@@ -329,8 +329,8 @@ def check_shape():
     check('category titles', [c['title'] for c in cats] == [
         'Vocabulary', 'Sentence patterns', 'Punctuation', 'Three-item lists',
         'Possible unsupported proof', 'Placeholders to fill in'], [c['title'] for c in cats])
-    check('only proof and placeholders are advisory',
-          [c['advisory'] for c in cats] == [False] * 4 + [True] * 2, cats)
+    check('proof, lists of three and placeholders are advisory',
+          [c['advisory'] for c in cats] == [False] * 3 + [True] * 3, cats)
     check('sloppy text: words, score, clean',
           (r['words'], r['score'], r['clean']) == (9, 3, False), r)
     check('vocabulary hits carry a count', cats[0]['hits'] == [
@@ -556,6 +556,14 @@ def two_rounds():
     check('two rounds: result', (done['text'], done['rounds']) == ('We use a tool.', 2), done)
     check('two rounds: notes from both',
           done['notes'] == ['First pass.', 'Second pass.'], done['notes'])
+    # A note the model repeats in a later round is shown once.
+    model_says('We leverage a tool.' + NOTES + '- Cut the opener.',
+               'We use a tool.' + NOTES + '- cut  the opener\n- Kept the facts.')
+    again_done = run(SLOPPY)[-1]
+    check('two rounds: a note said again is listed once',
+          again_done.get('notes') == ['Cut the opener.', 'Kept the facts.'], again_done.get('notes'))
+    check('notes: case, spacing and the full stop do not make a note new',
+          server.fresh_notes(['Cut it.'], ['cut it', 'CUT  IT!', 'Kept it.', 'kept it']) == ['Kept it.'])
     again = calls[1]['message']
     check('round two sends the current copy, not the draft',
           again.endswith('TEXT TO EDIT:\nWe leverage a tool.'), again[-60:])
@@ -632,9 +640,9 @@ def no_progress():
 # ── a rewrite of text that passes never comes back worse than the text ──────
 @section
 def never_worse():
-    # Round one adds a list of three; round two keeps it, citing the exception (DAILY-3).
-    listed = 'It is a tool that checks copy for tone, length, and style.'
-    model_says(listed + NOTES + '- one', listed + NOTES + '- a real list of three things')
+    # Round one adds a word; round two keeps it, citing the exception (DAILY-3).
+    worse = 'It is a robust tool that checks copy.'
+    model_says(worse + NOTES + '- one', worse + NOTES + '- a product term')
     done = run(CLEAN)[-1]
     check('a draft that passes beats every round that added a pattern',
           (done['text'], done['after']['clean'], done['rounds'], done.get('stopped'))
@@ -645,20 +653,148 @@ def never_worse():
           'Your last edit added' in calls[1]['message'] and server.UNLESS not in calls[1]['message']
           and 'still flags' not in calls[1]['message'], calls[1]['message'])
     # A pattern the draft had keeps the exception; one the edit added does not get it.
-    draft = 'We use feedback, notes, and calls. It is a seamless tool.'
-    model_says('We use feedback, notes, and calls. It is a tool for tone, length, and style.' + NOTES,
-               'We use feedback, notes, and calls. It is a tool.' + NOTES)
+    draft = 'We use feedback from clients. It is a seamless tool.'
+    model_says('We leverage feedback from clients. It is a seamless tool.' + NOTES,
+               'We use feedback from clients. It is a tool.' + NOTES)
     run(draft)
     second = calls[1]['message']
     check('round two: what the draft had is still flagged, with the exception',
           'still flags the following' in second and server.UNLESS in second
-          and second.index('feedback, notes') < second.index('Your last edit added'), second)
+          and 'Your last edit added' in second
+          and second.index('seamless') < second.index('Your last edit added'), second)
     check('round two: and what the edit added is listed after it',
-          'tone, length' in second[second.index('Your last edit added'):], second)
+          'leverage' in second[second.index('Your last edit added'):].split('TEXT TO EDIT:')[0], second)
     # A draft that was flagged is not put back: a round that is better is the result.
     model_says('It is a seamless tool.' + NOTES, 'It is a seamless tool.' + NOTES)
     done = run(SLOPPY)[-1]
     check('a flagged draft is never the result', done['text'] == 'It is a seamless tool.', done)
+
+
+# ── a list of three costs a point, is asked about once, and never costs a round ─
+@section
+def lists_of_three_are_advisory():
+    r = server.check('It is faster, smarter, and better.')
+    rhythm = r['categories'][3]
+    check('a list of three alone is clean at 4/5', (r['clean'], r['score']) == (True, 4), r)
+    check('and is advisory, with its snippet', rhythm['advisory'] is True and rhythm['hits'] == [
+        {'label': 'rule-of-three list', 'detail': 'faster, smarter, and better'}], rhythm)
+    check('it is not counted as a flag', server.flag_count(r) == 0, r)
+    # Round one names it, with the exception for a real list; a rewrite that keeps it passes.
+    model_says('We use feedback, notes, and calls.' + NOTES)
+    ev = run('We leverage feedback, notes, and calls.')
+    done = ev[-1]
+    check('a list of three left in place ends the run in one round',
+          (done['rounds'], len(calls), done['after']['clean']) == (1, 1, True), done)
+    check('round one names the list of three, with the exception',
+          'Three-item lists' in calls[0]['message'] and server.UNLESS in calls[0]['message'],
+          calls[0]['message'])
+    # Later rounds do not ask about it again.
+    model_says('We leverage a tool for tone, length, and style.' + NOTES,
+               'We use a tool for tone, length, and style.' + NOTES)
+    done = run('We leverage a seamless tool for tone, length, and style.')[-1]
+    asked = calls[1]['message'].split('TEXT TO EDIT:')[0]
+    check('round two does not ask about a list of three',
+          'Three-item lists' not in asked and 'tone, length' not in asked and 'leverage' in asked, asked)
+    check('and the run ends clean', (done['rounds'], done['after']['clean']) == (2, True), done)
+    # A list of three the edit added is not listed as added.
+    model_says('We leverage a tool for notes, calls, and emails.' + NOTES,
+               'We use a tool for notes, calls, and emails.' + NOTES)
+    run('We leverage a seamless tool.')
+    asked = calls[1]['message'].split('TEXT TO EDIT:')[0]
+    check('a list of three the edit added is not named in round two',
+          'Your last edit added' not in asked and 'notes, calls' not in asked, asked)
+    # An automatic run on text whose only hit is a list of three is skipped, as text that passes is.
+    listed = 'The app checks tone, length, and style for you.'
+    model_says()
+    ev = run(listed, auto=True)
+    check('auto: a paste whose only hit is a list of three is not sent',
+          kinds(ev) == ['start', 'done'] and not calls and ev[-1]['rounds'] == 0, (kinds(ev), calls))
+    check('its flag count is 0', server.flag_count(server.check(listed)) == 0, server.check(listed))
+    model_says(listed + NOTES)
+    check('by hand: it is still sent', run(listed)[-1]['rounds'] == 1 and len(calls) == 1, len(calls))
+
+
+# ── a chat answer's bold run-in labels are folded in round one, as Copy writes plain text ─
+@section
+def bold_labels():
+    three = '- **Cost:** It is cheap.\n- **Speed:** It is quick.\n- **Support:** It is local.'
+    check('labels: three labelled bullets give three labels',
+          server.bold_labels(three) == ['Cost:', 'Speed:', 'Support:'], server.bold_labels(three))
+    check('labels: numbered items and paragraphs count too', len(server.bold_labels(
+        '1. **Cost:** It is cheap.\n2. **Speed:** It is quick.\n\n**Why it fits:**\n\nIt is local.')) == 3)
+    check('labels: none in a text with a heading', server.bold_labels('## Plan\n\n' + three) == [])
+    check('labels: two are not enough', server.bold_labels(three.rsplit('\n', 1)[0]) == [])
+    check('labels: none inside a fenced block', server.bold_labels('```\n' + three + '\n```') == [])
+    check('labels: a bold Subject line is not one',
+          server.bold_labels('**Subject:** Hi\n\n' + three.rsplit('\n', 1)[0]) == [])
+    check('labels: none in a Word file', server.bold_labels(three, document=True) == [])
+    started = time.monotonic()
+    server.bold_labels('*' * 200_000)
+    server.bold_labels('**' + 'a' * 200_000)
+    check('labels: a long run of asterisks returns at once', time.monotonic() - started < 1,
+          time.monotonic() - started)
+
+    # Round one asks for them to be folded; round two does not ask again.
+    draft = 'We leverage a seamless tool.\n\n' + three
+    model_says('We leverage a tool.\n\n' + three + NOTES, 'We use a tool.\n\n' + three + NOTES)
+    done = run(draft)[-1]
+    first = calls[0]['message'].split('TEXT TO EDIT:')[0]
+    check('labels: round one asks for them to be folded, naming them',
+          'bold label' in first and '"**Cost:**"' in first, first)
+    check('labels: the ask comes before the rules',
+          first.index('bold label') < first.index('Never invent a number'), first)
+    # A title, a section name or a price on a line of its own stays a plain line, not a sentence:
+    # "**Details**" made into "The mug has the following features:" reads worse than before.
+    check('labels: a label on a line of its own stays a short line, not a sentence',
+          'A label on a line of its own, such as a title, a section name or a price, stays a short line' in first
+          and 'never make it into a sentence' in first and 'into a plain sentence' not in first, first)
+    asked = calls[1]['message'].split('TEXT TO EDIT:')[0]
+    check('labels: round two does not ask again', 'bold label' not in asked and 'Cost' not in asked, asked)
+    check('labels: labels left in the result are counted', done.get('labels_left') == 3, done.get('labels_left'))
+    model_says('We use a tool.\n\n- It is cheap.\n- It is quick.\n- It is local.' + NOTES)
+    done = run(draft)[-1]
+    check('labels: none counted when the rewrite folded them', 'labels_left' not in done, done.get('labels_left'))
+
+    # A Word file keeps its bold.
+    blocks = 'We leverage a tool.\n\n- **Cost:** It is cheap.\n\n- **Speed:** It is quick.\n\n- **Support:** It is local.'
+    model_says(blocks.replace('leverage', 'use') + NOTES)
+    done = run(blocks, structure=True)[-1]
+    check('labels: a Word file is not asked', len(calls) == 1 and 'bold label' not in calls[0]['message']
+          and 'labels_left' not in done, calls)
+
+    # A long text with a heading: the part with the labels has none of its own, and is still not asked.
+    plain = ('The tool reads a file and reports what it finds. ' * 20).strip()
+    slop = "It's not just a tool, it's a game-changing journey."
+    long = '\n\n'.join(['# Guide'] + [plain] * 6 + [slop, three] + [plain] * 7 + [slop])
+    check('labels: the long text is in parts, its labels not in the first',
+          len(server.split_parts(long)) > 1 and 'Cost' not in server.split_parts(long)[0])
+    calls.clear()
+
+    def fixes(system_prompt, user_message, model, cancel):
+        calls.append({'message': user_message})
+        return user_message.split('TEXT TO EDIT:\n', 1)[1].replace(slop, 'It is a tool.') + NOTES
+
+    server.run_model = fixes
+    done = run(long)[-1]
+    check('labels: a long text with a heading is never asked',
+          done['event'] == 'done' and calls and not any('bold label' in c['message'] for c in calls),
+          (done.get('event'), len(calls)))
+    # With no heading, the part that has the labels is sent and asked, though it passes.
+    calls.clear()
+    long = '\n\n'.join([plain] * 6 + [slop] + [plain] * 7 + ['Here is the plan.', three])
+    done = run(long)[-1]
+    asked = [c for c in calls if 'bold label' in c['message']]
+    check('labels: in a long text with no heading, the part with labels is sent and asked',
+          done['event'] == 'done' and len(calls) == 2 and len(asked) == 1 and 'Cost' in asked[0]['message'],
+          (done.get('event'), len(calls), len(asked)))
+
+    # A text that passes but has labels is still sent by an automatic run.
+    passing = 'Here is the plan.\n\n' + three
+    check('labels: the passing sample passes', server.check(passing)['clean'], server.check(passing))
+    model_says('Here is the plan.\n\n- It is cheap.\n- It is quick.\n- It is local.' + NOTES)
+    ev = run(passing, auto=True)
+    check('auto: a passing text with three labels still runs',
+          ev[-1]['rounds'] == 1 and len(calls) == 1 and 'bold label' in calls[0]['message'], (kinds(ev), calls))
 
 
 # ── no marker: fail open, as tools/cleanse.sh does ──────────────────────────
@@ -963,6 +1099,65 @@ def carried_over():
           f'{time.time() - began:.1f}s')
 
 
+# ── a rewrite that adds a caveat the draft did not have is named, never blocked ─
+@section
+def added_caveats():
+    got = server.hedged('In most markets, React roles outnumber Vue roles by a wide margin.',
+                        'React roles generally outnumber Vue roles, though the balance varies by market.')
+    check('caveats: an added though, generally and varies are named',
+          len(got) == 1 and all(w in got[0][1] for w in ('generally', 'though', 'varies'))
+          and got[0][1].startswith('added: ') and got[0][0].startswith('React roles generally'), got)
+    got = server.hedged('It may rain on Friday.', 'It may rain on Friday, so bring a coat.')
+    check('caveats: the same qualifier on both sides is not added', got == [], got)
+    got = server.hedged('The launch is set for early spring this year.', 'The launch is set for May 3 this year.')
+    check('caveats: May 3 is a date, not a hedge', got == [], got)
+    got = server.hedged('The tool reads one file and stops.', 'The tool reads one file and stops. Weather might change quickly tomorrow.')
+    check('caveats: a new sentence that shares no words is not paired', got == [], got)
+    check('caveats: an unchanged text has no hedged key',
+          'hedged' not in server.carried(CLEAN + ' It runs every night.', CLEAN + ' It runs every night.'))
+    many = ' '.join(f'Team {n} ships the build on Monday.' for n in range(10))
+    got = server.hedged(many, many.replace('ships the build on Monday.', 'generally ships the build on Monday.'))
+    check('caveats: at most 6 sentences are listed', len(got) == 6, len(got))
+
+    board = {'text': None, 'writes': []}
+
+    def put(text):
+        board['writes'].append(text)
+        return True
+
+    real = server.clipboard_text, server.set_clipboard
+    draft = 'Our robust backups run every night at two.'
+    server.clipboard_text, server.set_clipboard = (lambda: draft), put
+    try:
+        model_says('Our backups generally run every night at two, though timing varies.' + NOTES)
+        done = run(draft, copy=True)[-1]
+        hedges = done['warnings'].get('hedged')
+        check('caveats: a run that adds one lists it in the warnings',
+              hedges and len(hedges) == 1 and 'generally' in hedges[0][1], done['warnings'])
+        check('caveats: and it still passes and is copied, as the copy rules decide',
+              done['after']['clean'] is True and done.get('copied') is True and len(board['writes']) == 1,
+              (done['after']['clean'], done.get('copied'), board))
+    finally:
+        server.clipboard_text, server.set_clipboard = real
+
+    status, _, data = request('POST', '/api/check', {'text': 'Our backups generally run every night at two.',
+                                                    'draft': 'Our backups run every night at two.'})
+    got = json.loads(data).get('warnings', {})
+    check('caveats: /api/check with a draft returns them', status == 200 and len(got.get('hedged', [])) == 1, got)
+
+    big = ('The tool reads a file and reports what it finds. ' * 4000)[:200_000]
+    began = time.time()
+    server.hedged(big, big.replace('reports', 'generally reports'))
+    server.carried(big, big.replace('reports', 'generally reports'))
+    check('caveats: a 200,000-character text is checked quickly', time.time() - began < 2,
+          f'{time.time() - began:.1f}s')
+    began = time.time()
+    unbroken = 'word ' * 40_000
+    server.hedged(unbroken, unbroken + 'may')
+    check('caveats: one 200,000-character sentence is checked quickly', time.time() - began < 2,
+          f'{time.time() - began:.1f}s')
+
+
 # ── a long text is rewritten a part at a time ────────────────────────────────
 @section
 def long_texts():
@@ -1011,7 +1206,7 @@ def long_texts():
     check('parts: blank space alone makes no part',
           all(p.strip() for p in server.split_parts('\n\n \n\n'.join([plain] * 12))))
 
-    def editor(fail_on=(), code='timeout'):
+    def editor(fail_on=(), code='engine_failed'):
         seen = []
 
         def fake(system_prompt, message, model, cancel):
@@ -1053,11 +1248,12 @@ def long_texts():
           and any('Three parts failed' in n for n in done['notes']), (len(seen), done.get('parts')))
     editor(fail_on=(1,))
     check('parts: when the first call fails the run fails',
-          run(text)[-1].get('error', {}).get('code') == 'timeout')
+          run(text)[-1].get('error', {}).get('code') == 'engine_failed')
     # A usage limit or a lapsed sign-in part-way through keeps the parts already rewritten,
-    # and spends no more calls on the parts after it.
+    # and spends no more calls on the parts after it. So does a lost network or a call that ran
+    # out of time: each CLI retries for minutes first, so each call more would cost as long again.
     longer = '\n\n'.join([text] + [plain.strip()] * 6 + [slop.strip()])
-    for code in ('usage_limit', 'not_logged_in'):
+    for code in ('usage_limit', 'not_logged_in', 'offline', 'timeout'):
         seen = editor(fail_on=(2,), code=code)
         done = run(longer)[-1]
         check(f'parts: {code} part-way through keeps the parts already rewritten',
@@ -1370,10 +1566,15 @@ def changes_view():
     reply = json.loads(data)
     check('check with a draft: the check, and what carried over from the draft',
           status == 200 and reply.get('warnings') == server.carried(draft, text)
-          and {k: v for k, v in reply.items() if k != 'warnings'} == server.check(text), reply)
+          and {k: v for k, v in reply.items() if k not in ('warnings', 'labels_left')} == server.check(text)
+          and reply.get('labels_left') == 0, reply)
     check('check with a draft: which here is a lost link, a new one and a new number',
           reply.get('warnings') == {'lost': ['https://example.com/b'], 'new': ['https://example.com/a', '10,000'],
                                     'checked': 2}, reply.get('warnings'))
+    labelled = '- **Cost:** It is cheap.\n- **Speed:** It is quick.\n- **Support:** It is local.'
+    reply = json.loads(request('POST', '/api/check', {'text': labelled, 'draft': labelled})[2])
+    check('check with a draft: bold labels put back with a paragraph are counted', reply.get('labels_left') == 3,
+          reply.get('labels_left'))
     reply = json.loads(request('POST', '/api/check', {'text': text})[2])
     check('check without a draft: still exactly four fields', set(reply) == {'words', 'score', 'clean', 'categories'},
           set(reply))
@@ -1690,11 +1891,16 @@ elif mode == 'no_model' or mode == 'no_pin' and model == 'claude-haiku-5-5':
 elif mode == 'logged_out':
     out, code = json.dumps({'type': 'result', 'is_error': True,
                             'result': 'Not logged in - Please run /login'}), 1
-elif mode in ('limit', 'limit_old', 'overloaded'):
+elif mode in ('limit', 'limit_old', 'overloaded', 'offline', 'refused', 'ssl'):
     # How 2.1.292 says the plan is spent, how older copies said it, and an error that is no limit.
+    # Then how it gives up after its retries with no network, and a certificate error, which is
+    # no network problem.
     said = {'limit': "You've hit your session limit \\u00b7 resets 3pm (Europe/Berlin)",
             'limit_old': 'Claude AI usage limit reached|1760900000',
-            'overloaded': 'API Error: 529 Overloaded'}[mode]
+            'overloaded': 'API Error: 529 Overloaded',
+            'offline': "API Error: Can't reach the API server - check your internet or DNS (ENOTFOUND)",
+            'refused': 'API Error: Connection refused - a firewall or proxy may be blocking it (ECONNREFUSED)',
+            'ssl': 'API Error: Unable to connect to API: SSL certificate has expired'}[mode]
     out, code = json.dumps({'type': 'result', 'is_error': True, 'result': said}), 1
 else:
     system = None
@@ -1782,7 +1988,8 @@ def real_engine_with_a_fake_cli():
 
         for mode, want in (('logged_out', 'not_logged_in'), ('limit', 'usage_limit'),
                            ('limit_old', 'usage_limit'), ('overloaded', 'engine_failed'),
-                           ('garbage', 'engine_failed')):
+                           ('garbage', 'engine_failed'), ('offline', 'offline'), ('refused', 'offline'),
+                           ('ssl', 'engine_failed')):
             got = engine_code(mode)
             check(f'CLI: {mode} is {want}', got == want, got)
         # A spent plan is told in the app's words, with the time the CLI gives (QA FR-1).
@@ -1804,6 +2011,21 @@ def real_engine_with_a_fake_cli():
             logged = fh.read()
         check('CLI: unreadable output is logged by size, not content',
               'unreadable output' in logged and 'Segmentation fault' not in logged, logged[-300:])
+        # No network: the CLI retries for about three minutes, then says so in its own words.
+        said = engine_error('offline')[1]
+        check('CLI: no network says to check the connection', said == server.OFFLINE.format('Claude'), said)
+
+        # A data folder that cannot be written: say so, not "see the log", which cannot be written either.
+        real_dir, blocked = server.DATA_DIR, os.path.join(tmp, 'not-a-folder')
+        open(blocked, 'w').close()
+        server.DATA_DIR = blocked
+        try:
+            ran = len(spawned)
+            got = engine_error('ok')
+        finally:
+            server.DATA_DIR = real_dir
+        check('CLI: a data folder that cannot be written is said so, and no CLI starts',
+              got[0] == 'data_folder' and 'data folder' in got[1] and len(spawned) == ran, got)
 
         cancel = threading.Event()
         threading.Timer(0.5, cancel.set).start()
@@ -2220,6 +2442,12 @@ def chatgpt_engine():
         os.environ['SLOP_CODEX'] = 'ok'
         s = json.loads(request('GET', '/api/status')[2])['engines']['chatgpt']
         check('status: ChatGPT\'s answer is cached while it says signed out', not s['signed_in'], s)
+        # Signed in is trusted for minutes, so a run after a pause does not wait on `codex login status`.
+        server._codex_status['until'] = 0
+        s = json.loads(request('GET', '/api/status')[2])['engines']['chatgpt']
+        check('status: ChatGPT signed in is trusted for minutes',
+              s['signed_in'] and server._codex_status['until'] - time.monotonic() > 200,
+              server._codex_status['until'] - time.monotonic())
         shutil.which = no_cli
         server._codex_status['until'] = 0
         s = json.loads(request('GET', '/api/status')[2])['engines']['chatgpt']
@@ -2815,6 +3043,60 @@ def unpacked_leftovers():
     check('a missing TEMP is no error', server.sweep_unpacked(os.path.join(tmp, 'nowhere', '_MEI1')) == [])
 
 
+@section
+def run_leftovers():
+    # A copy ended mid-run (Task Manager, a forced restart) never reaches the finally blocks
+    # that remove a run's Codex work folder and prompt file. The next start does.
+    old = time.time() - server.TIMEOUT - 120
+    os.makedirs(server.DATA_DIR, exist_ok=True)
+
+    def made(name, folder=False, age=old):
+        path = os.path.join(server.DATA_DIR, name)
+        if folder:
+            os.makedirs(path)
+            with open(os.path.join(path, 'instructions.txt'), 'w') as fh:
+                fh.write('system')
+        else:
+            with open(path, 'w') as fh:
+                fh.write('system')
+        os.utime(path, (age, age))
+        return name
+
+    stale = [made('codex-ab12cd34', folder=True), made('prompt-ef56gh78.txt')]
+    kept = [made('codex-young001', folder=True, age=time.time()), made('prompt-young001.txt', age=time.time()),
+            made('prompt-notes.txt'), made('codex-notes', folder=True)]
+    noted = os.path.join(server.DATA_DIR, 'instance.json')
+    with open(noted, 'rb') as fh:             # the long-lived server's, which this copy replaces
+        held = fh.read()
+    port, thread = start()
+    present = os.listdir(server.DATA_DIR)
+    request('POST', '/api/shutdown', port=port)
+    thread.join(10)
+    with open(noted, 'wb') as fh:
+        fh.write(held)
+    check('a killed run\'s work folder and prompt file are removed at the next start',
+          not set(stale) & set(present), present)
+    check('a run that may still be going, and names the app did not make, are kept',
+          set(kept) <= set(present), present)
+    for name in kept + stale:
+        path = os.path.join(server.DATA_DIR, name)
+        shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else (
+            os.path.exists(path) and os.remove(path))
+
+
+@section
+def unwritable_data_folder():
+    # instance.json is optional: a copy that cannot write it still starts.
+    gone = os.path.join(tmp, 'gone', 'instance.json')
+    try:
+        server.write_instance(gone, 47999, b'k' * 32)
+        raised = None
+    except Exception as e:                    # noqa: BLE001
+        raised = e
+    check('instance.json that cannot be written is no reason to stop', raised is None, repr(raised))
+    check('... and leaves nothing behind', not os.path.exists(os.path.dirname(gone)))
+
+
 # ── SlopMonster.exe: its own child processes, and the options for testing ──
 @section
 def the_exe():
@@ -3000,6 +3282,124 @@ def events_for_the_page():
         server.EVENT_WAIT = wait
         server.log.removeHandler(kept)
         server.log.setLevel(logging.NOTSET)
+
+
+# ── two windows: a press goes to the one the user was in last ───────────────
+@section
+def front_window():
+    status, _, data = request('POST', '/api/front', {'page': 'a'})
+    check('front: a page says its window is in front', (status, json.loads(data)) == (200, {}), data)
+    for body in ({'page': 1}, {}, b'not json', ['a']):
+        got = refused('POST', '/api/front', body)
+        check(f'front: {body!r} is refused', got == (400, 'bad_request'), got)
+    wait = server.EVENT_WAIT
+    server.EVENT_WAIT = 10
+    got = {}
+
+    def poll(page):
+        status, _, data = request('GET', '/api/events?page=' + page)
+        got[page] = (json.loads(data).get('events'), time.monotonic())
+
+    def waiting(page):
+        thread = threading.Thread(target=poll, args=(page,), daemon=True)
+        thread.start()
+        time.sleep(0.2)
+        return thread
+
+    try:
+        # b waits first, so without the routing it would be first to wake.
+        b, a = waiting('b'), waiting('a')
+        queued = time.monotonic()
+        server.queue_event({'event': 'hotkey', 'text': 'front'})
+        a.join(5)
+        check('front: the window last in front takes the press at once',
+              got.get('a', (None, 99))[0] == [{'event': 'hotkey', 'text': 'front'}]
+              and got['a'][1] - queued < server.EVENT_HANDOFF * 0.8, (got, queued))
+        check('front: the other window is still waiting', b.is_alive(), got)
+        # The window in front was closed: the other takes the next press, after the hand-off.
+        queued = time.monotonic()
+        server.queue_event({'event': 'hotkey', 'text': 'late'})
+        b.join(5)
+        check('front: with the front window gone, another takes the press after a second',
+              got.get('b', (None, 0))[0] == [{'event': 'hotkey', 'text': 'late'}]
+              and server.EVENT_HANDOFF * 0.9 <= got['b'][1] - queued < server.EVENT_HANDOFF + 1.5,
+              (got, queued))
+        # The user switches to b.
+        got.clear()
+        request('POST', '/api/front', {'page': 'b'})
+        a, b = waiting('a'), waiting('b')
+        queued = time.monotonic()
+        server.queue_event({'event': 'hotkey', 'text': 'switched'})
+        b.join(5)
+        check('front: after a switch the press goes to the new front window',
+              got.get('b', (None, 99))[0] == [{'event': 'hotkey', 'text': 'switched'}]
+              and got['b'][1] - queued < server.EVENT_HANDOFF * 0.8 and a.is_alive(), (got, queued))
+        server.queue_event({'event': 'hotkey', 'text': 'end'})     # lets a's request go
+        a.join(5)
+    finally:
+        server.EVENT_WAIT = wait
+        request('POST', '/api/front', {'page': ''})
+
+
+# ── the log keeps runs, not the page's routine polling ──────────────────────
+@section
+def quiet_log():
+    lines = []
+
+    class Kept(logging.Handler):
+        def emit(self, record):
+            lines.append(record.getMessage())
+
+    kept = Kept()
+    server.log.setLevel(logging.INFO)
+    server.log.addHandler(kept)
+    wait = server.EVENT_WAIT
+    server.EVENT_WAIT = 0.2
+    try:
+        request('GET', '/api/events?page=x')
+        request('GET', '/api/status')
+        request('POST', '/api/check', {'text': CLEAN})
+        request('POST', '/api/front', {'page': ''})
+        check('log: routine answers to the page add no line', not lines, lines)
+        request('GET', '/api/events', token='wrong')
+        request('POST', '/api/check', b'not json')
+        request('GET', '/api/ping')
+        check('log: refusals and other requests are still logged',
+              any('GET /api/events' in line and '403' in line for line in lines)
+              and any('POST /api/check' in line and '400' in line for line in lines)
+              and any('GET /api/ping' in line for line in lines), lines)
+    finally:
+        server.EVENT_WAIT = wait
+        server.log.removeHandler(kept)
+        server.log.setLevel(logging.NOTSET)
+
+
+# ── the window opens at the size it had last time ───────────────────────────
+@section
+def window_size():
+    profile = os.path.join(tmp, 'profile-size')
+    prefs = os.path.join(profile, 'Default', 'Preferences')
+    os.makedirs(os.path.dirname(prefs), exist_ok=True)
+
+    def flags(place, raw=None):
+        with open(prefs, 'w', encoding='utf-8') as fh:
+            fh.write(raw if raw is not None else json.dumps(
+                {'browser': {'app_window_placement': {'127': {'0': {'0': {'1_/': place}}}}}}))
+        return server.window_flags(profile)
+
+    check('window: maximised last time opens maximised',
+          flags({'left': 0, 'top': 0, 'right': 1920, 'bottom': 1040, 'maximized': True}) == ['--start-maximized'])
+    check('window: a size set last time comes back',
+          flags({'left': 300, 'top': 120, 'right': 1700, 'bottom': 1020, 'maximized': False})
+          == ['--window-size=1400,900'])
+    default = ['--window-size=1180,820']
+    check('window: a size too small is not used', flags({'left': 0, 'top': 0, 'right': 100, 'bottom': 50}) == default)
+    check('window: a placement without numbers is not used', flags({'left': 'x'}) == default)
+    check('window: a corrupt Preferences file is not used', flags(None, '{not json') == default)
+    check('window: a placement under another name is not used',
+          flags(None, json.dumps({'browser': {'app_window_placement': {'127.0.0.1_/': {'maximized': True}}}})) == default)
+    os.remove(prefs)
+    check('window: a new profile opens at 1180x820', server.window_flags(profile) == default)
 
 
 # ── shutdown ────────────────────────────────────────────────────────────────
@@ -3503,6 +3903,24 @@ def relaunch_while_the_last_copy_stops():
         t.join(10)
     check('relaunch: both copies stop', not thread.is_alive() and not first.is_alive())
     model_says()
+
+
+@section
+def launch_after_a_crash():
+    # A copy ended from Task Manager leaves instance.json naming a port nobody holds. A ping
+    # there takes Windows two seconds to refuse; the next launch should not wait for it.
+    base = free_ports()
+    noted = os.path.join(server.DATA_DIR, 'instance.json')
+    os.makedirs(server.DATA_DIR, exist_ok=True)
+    with open(noted, 'w', encoding='utf-8') as fh:
+        json.dump({'port': base, 'key': os.urandom(32).hex()}, fh)
+    began = time.time()
+    port, thread = start(port=base)
+    took = time.time() - began
+    request('POST', '/api/shutdown', port=port)
+    thread.join(10)
+    check('after a crash: the next launch takes the same port without waiting',
+          port == base and took < 1, (base, port, round(took, 2)))
 
 
 @section

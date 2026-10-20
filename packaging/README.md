@@ -23,6 +23,7 @@ PATH, pass it: `packaging\build.ps1 -Python C:\Python312\python.exe`.
 `build.ps1` sets `SOURCE_DATE_EPOCH` to the time of the last commit and `PYTHONHASHSEED`
 to 0, so two builds of the same commit with the same Python are identical byte for byte.
 An exe built with another Python, such as the 3.12 the release workflow uses, differs.
+Outside a git checkout, such as a source zip, it builds without the commit time.
 
 `SlopMonster.spec` sets what goes in: the files the server reads by path, under the same
 folders as in the repository, and the modules it imports. It leaves out Pillow, fontTools

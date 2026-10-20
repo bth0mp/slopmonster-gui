@@ -11,9 +11,10 @@ if ($LASTEXITCODE) {
 }
 
 # The same tree and Python then give the same exe, byte for byte: zip times from the last
-# commit, and a fixed hash seed.
+# commit, and a fixed hash seed. Outside a git checkout, such as a source zip, git fails and
+# the build goes on without them.
 if (-not $env:SOURCE_DATE_EPOCH) {
-    $commit = git -C $root log -1 --format=%ct 2> $null
+    $commit = & { $ErrorActionPreference = 'Continue'; git -C $root log -1 --format=%ct 2> $null }
     if (-not $LASTEXITCODE -and $commit) { $env:SOURCE_DATE_EPOCH = "$commit".Trim() }
 }
 $env:PYTHONHASHSEED = '0'

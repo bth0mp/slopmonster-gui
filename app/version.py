@@ -3,4 +3,4 @@
 The server shows it at the foot of Settings, and packaging/SlopMonster.spec writes it into
 SlopMonster.exe's Windows version information. A release is tagged v<VERSION>.
 """
-VERSION = '1.0.0'
+VERSION = '1.1.0'

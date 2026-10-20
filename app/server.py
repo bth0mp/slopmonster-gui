@@ -160,7 +160,8 @@ TESTED_CLI = (2, 1, 292)
 TITLES = {'vocab': 'Vocabulary', 'phrases': 'Sentence patterns', 'punctuation': 'Punctuation',
           'rhythm': 'Three-item lists', 'proof': 'Possible unsupported proof',
           'placeholders': 'Placeholders to fill in'}
-ADVISORY = ('proof', 'placeholders')    # listed for the author, never a reason to rewrite
+ADVISORY = ('proof', 'placeholders', 'rhythm')    # listed for the author, never a reason to rewrite
+ASKED_ONCE = ('rhythm',)    # advisory, but the first round still asks about it, with UNLESS
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)   # Windows: no console flashing up
@@ -189,6 +190,9 @@ NO_PROSE = 'SlopMonster leaves code blocks as they are, and this text has nothin
 STOPPED = 'This run was stopped.'
 LOG_AT = r'%LOCALAPPDATA%\SlopMonster\server.log'      # as the README names it, for Explorer's address bar
 UNEXPECTED = f'SlopMonster hit an unexpected error. The details are in {LOG_AT}.'
+OFFLINE = 'SlopMonster could not reach {}. Check the internet connection, then try again.'   # index.html too
+DATA_FOLDER = (r'SlopMonster cannot write to its data folder (%LOCALAPPDATA%\SlopMonster). Check that '
+               'the disk has space and the folder is not read-only.')
 
 log = logging.getLogger('slopmonster')
 
@@ -227,7 +231,7 @@ def check(text):
         score = deslop.report(hits)
     categories = []
     for key, title in TITLES.items():
-        if key in ADVISORY:
+        if key in ('proof', 'placeholders'):
             found = [{'label': claim, 'detail': ''} for claim in hits[key]]
         elif key == 'phrases':
             found = [{'label': label, 'detail': f'×{count}', 'match': match}
@@ -240,6 +244,8 @@ def check(text):
     # Proof is advisory: the regex sees a number beside a noun, and only the author knows
     # whether it is true. It costs a point, as upstream scores it, but never blocks "clean".
     # Placeholders cost nothing: the rewrite keeps them, so only the author can fill them in.
+    # A list of three costs a point and never blocks "clean" either. It is the checker's weakest
+    # signal, and a model asked again about a list it wrote defends it and spends two rounds.
     return {'words': words, 'score': score if words else None,
             'clean': not any(c['hits'] for c in categories if not c['advisory']),
             'categories': categories}
@@ -262,10 +268,36 @@ def placeholders(result):
     return [h['label'] for c in result['categories'] if c['key'] == 'placeholders' for h in c['hits']]
 
 
+# A bold label opening a list item or paragraph, as chat answers write them: "- **Cost:** ...".
+# Bounded, as every pattern here is (see check()). Not the bold **Subject:** line the checker has.
+_BOLD_LABEL = re.compile(r'(?m)^[ \t]{0,6}(?:(?:[-*+]|\d{1,2}[.)])[ \t]+)?\*\*(?!\s)(?!(?i:subject)\b)([^*\n]{1,60}?)\*\*')
+_HEADING = re.compile(r'(?m)^[ \t]{0,3}#{1,6}[ \t]')
+_FENCED = re.compile(r'(?ms)^[ \t]*```.*?^[ \t]*```')
+LABELS_MOST = 3
+
+
+def bold_labels(text, document=False):
+    """The bold labels a chat answer opens its items and paragraphs with: at least
+    LABELS_MOST of them, in a text with no Markdown heading (a message, not a document)."""
+    view = _FENCED.sub('', text)
+    if document or _HEADING.search(view):
+        return []
+    found = [m.group(1).strip() for m in _BOLD_LABEL.finditer(view)]
+    return found if len(found) >= LABELS_MOST else []
+
+
+def labels_left(text):
+    """How many bold labels a result still has, when there are LABELS_MOST or more: those
+    paste with their asterisks where Markdown is not shown. 0 when there are fewer."""
+    left = len(_BOLD_LABEL.findall(_FENCED.sub('', text)))
+    return left if left >= LABELS_MOST else 0
+
+
 def flag_count(result):
     """How many things a check flagged that a round is asked to fix.
 
-    A word or pattern used three times is three. Proof is advisory and not counted.
+    A word or pattern used three times is three. Proof and lists of three are advisory and
+    not counted.
     """
     count = 0
     for c in result['categories']:
@@ -290,6 +322,7 @@ _status = {'until': 0, 'engine': None}
 _cli_model = dict(CLI_MODEL)          # this session's names, after any the CLI refused
 _version = {}                         # (path, modified time) of the CLI: the version it gave
 _codex_status = {'until': 0, 'engine': None}
+CODEX_SIGNED_IN_FOR = 300             # seconds a signed-in `codex login status` is trusted
 
 
 def saved_path():
@@ -443,6 +476,13 @@ def refused_command(complaint):
     return None
 
 
+def unwritable(err):
+    """The error for a run that cannot write its files to DATA_DIR. "See the log" would send the
+    user to a file in that same folder, which may not have been written either."""
+    log.error('the data folder cannot be written: %r', err)
+    return EngineError('data_folder', DATA_FOLDER)
+
+
 @contextlib.contextmanager
 def prompt_file(text):
     """The path of a file in DATA_DIR that holds `text`, removed afterwards.
@@ -450,11 +490,17 @@ def prompt_file(text):
     The system prompt goes to the CLI in a file: on the command line, edited instructions of
     more than about 32,000 characters pass Windows' limit, and the CLI never starts.
     """
-    os.makedirs(DATA_DIR, exist_ok=True)
-    handle, path = tempfile.mkstemp(prefix='prompt-', suffix='.txt', dir=DATA_DIR)
     try:
-        with open(handle, 'w', encoding='utf-8', newline='') as fh:
-            fh.write(text)
+        os.makedirs(DATA_DIR, exist_ok=True)
+        handle, path = tempfile.mkstemp(prefix='prompt-', suffix='.txt', dir=DATA_DIR)
+    except OSError as e:
+        raise unwritable(e) from None
+    try:
+        try:
+            with open(handle, 'w', encoding='utf-8', newline='') as fh:
+                fh.write(text)
+        except OSError as e:
+            raise unwritable(e) from None
         yield path
     finally:
         with contextlib.suppress(OSError):
@@ -467,6 +513,15 @@ def prompt_file(text):
 # "Claude AI usage limit reached|<time>".
 CLAUDE_SPENT = re.compile(r'usage limit|(?:hit|reached) your .{0,40}?(?:limit|budget)|out of usage credits',
                           re.I)
+# How the CLI says it gave up for want of a network, after retrying for about three minutes:
+# 2.1.292's "Unable to connect to API. Check your internet connection", "Connection dropped",
+# "Connection refused - a firewall or proxy may be blocking it", "Can't reach the API server -
+# check your internet or DNS", "No internet route - check your connection or VPN", each with
+# the system's code. "Unable to connect to API: SSL ..." is a certificate problem and is not this.
+CLAUDE_OFFLINE = re.compile(r"Unable to connect to API\. Check|Connection (?:error|refused|dropped)|"
+                            r"Can't reach the API server|No internet route|"
+                            r'\b(?:ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|ENETDOWN|EHOSTUNREACH|'
+                            r'ECONNRESET|ETIMEDOUT)\b')
 
 
 def run_model(system_prompt, user_message, model, cancel):
@@ -554,6 +609,8 @@ def run_model(system_prompt, user_message, model, cancel):
                 when = re.search(r'resets ([^·\n]{1,60})', reply)
                 raise EngineError('usage_limit', CLAUDE_LIMIT + (
                     f' Claude Code says the limit resets {when[1].strip()}.' if when else ''))
+            if CLAUDE_OFFLINE.search(reply):
+                raise EngineError('offline', OFFLINE.format('Claude'))
             raise EngineError('engine_failed', f'Claude Code reported an error: {reply[:300]}')
         return reply
 
@@ -643,7 +700,9 @@ def chatgpt_status():
         how = re.search(r'(?m)^Logged in using (ChatGPT|an API key)\b', said)
         engine = {'installed': True, 'signed_in': not re.search(r'(?m)^Not logged in\s*$', said),
                   'how': {'ChatGPT': 'chatgpt', 'an API key': 'api_key'}[how[1]] if how else ''}
-    _codex_status.update(until=time.monotonic() + (20 if engine['signed_in'] else 2), engine=engine)
+    # Signed in holds for five minutes: `codex login status` costs most of a second before each
+    # run, and a run refused for the sign-in, or failing at all, asks again at once.
+    _codex_status.update(until=time.monotonic() + (CODEX_SIGNED_IN_FOR if engine['signed_in'] else 2), engine=engine)
     return engine
 
 
@@ -722,12 +781,18 @@ def run_codex(system_prompt, user_message, model, effort, cancel, seen=None):
     exe = find_codex()
     if chatgpt_status()['signed_in'] is False:
         raise EngineError('not_logged_in', CODEX_NOT_LOGGED_IN)   # signed out, Codex retries for 16 s
-    os.makedirs(DATA_DIR, exist_ok=True)
-    work = tempfile.mkdtemp(prefix='codex-', dir=DATA_DIR)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        work = tempfile.mkdtemp(prefix='codex-', dir=DATA_DIR)
+    except OSError as e:
+        raise unwritable(e) from None
     try:
         instructions, out = os.path.join(work, 'instructions.txt'), os.path.join(work, 'reply.txt')
-        with open(instructions, 'w', encoding='utf-8') as fh:
-            fh.write(system_prompt)
+        try:
+            with open(instructions, 'w', encoding='utf-8') as fh:
+                fh.write(system_prompt)
+        except OSError as e:
+            raise unwritable(e) from None
         with tempfile.TemporaryFile() as stdin, tempfile.TemporaryFile() as stderr:
             stdin.write(user_message.encode('utf-8', 'replace'))
             stdin.seek(0)
@@ -859,6 +924,18 @@ UNLESS = (' The exception is a match that is a literal, technical or otherwise n
           '(a product term, a real list of three things, a quotation). Leave those as they '
           'are and say why in your notes.')
 
+# Copy writes plain text, so a chat answer's bold labels would be pasted with their asterisks.
+# Round one only, as for lists of three; the prompts' rule to keep bold stays for every other bold.
+FOLD_LABELS = ('This text will be pasted where Markdown is not shown, and {n} of its list items or '
+               'paragraphs open with a bold label, such as {examples}. Bold labels like these '
+               'are a chat-assistant habit. Where a label runs into its sentence, fold it into that '
+               'sentence in plain words, or drop it where the sentence already says the same thing. '
+               'A label on a line of its own, such as a title, a section name or a price, stays a '
+               'short line of its own with the same words and no asterisks: never make it into a '
+               'sentence. Keep every list item as a list item and every '
+               'paragraph where it is. For these labels only, this replaces the rule to keep bold. '
+               'Keep any other bold, such as a warning or the name of a button.')
+
 
 # Text from a Word file is written back into the file block by block, so its shape is fixed.
 KEEP = ('This text comes from a Word document and goes back into it block by block. A block is '
@@ -897,8 +974,10 @@ def hit_key(category, h):
     return category['key'], h['label'], str(h.get('detail')), str(h.get('match'))
 
 
-def user_message(copy, result, proof, context, first, keep=False, again='', drafted=None):
+def user_message(copy, result, proof, context, first, keep=False, again='', drafted=None, labels=()):
     """What the model is asked this round: the checker's findings, the hard rules, the text.
+
+    `labels` are the bold run-in labels to fold, from bold_labels(); asked about in round one only.
 
     `drafted` holds the hit_key() of each hit in the author's draft. After the first round a
     hit that is not among them came from the model's own edit, so the exception for a real
@@ -910,7 +989,7 @@ def user_message(copy, result, proof, context, first, keep=False, again='', draf
 
     def listed(added):
         return [f"- {c['title']}: " + '; '.join(hit(h) for h in hits)
-                for c in result['categories'] if not c['advisory']
+                for c in result['categories'] if not c['advisory'] or (first and c['key'] in ASKED_ONCE)
                 for hits in [[h for h in c['hits'] if added(c, h)]] if hits]
 
     ours = drafted is None or first
@@ -944,7 +1023,10 @@ def user_message(copy, result, proof, context, first, keep=False, again='', draf
     rules += (' Never move prose into code formatting, strikethrough or an image description '
               'to get it past the check.')
     parts = [f'Context: {context}'] if context else []
-    parts += ['\n'.join([ask] + todo), rules]
+    parts.append('\n'.join([ask] + todo))
+    if first and labels:
+        parts.append(FOLD_LABELS.format(n=len(labels), examples='; '.join(f'"**{label}**"' for label in labels[:4])))
+    parts.append(rules)
     if keep:
         parts.append(KEEP + (' ' + again if again else ''))
     parts.append('TEXT TO EDIT:\n' + copy)
@@ -1068,6 +1150,9 @@ def carried(draft, rewrite):
     That is read line by line, from the draft's framing, and not by running the rules on the
     rewrite again: those see a fenced note only beside another tell, and a rewrite that
     rewords the opener would hide the number its notes still hold.
+
+    A rewrite sentence less sure than the draft's, as hedged() finds them, is listed under
+    'hedged', a key there only when it has one. It is advice, and stops nothing.
     """
     had, has = facts(draft), facts(rewrite)
     framing = deslop.chat_framing(checkable(draft))
@@ -1091,7 +1176,77 @@ def carried(draft, rewrite):
     framing = short(had, has, framed)
     if framing:
         warnings['framing'] = framing
+    try:
+        added = hedged(draft, rewrite)
+    except Exception:                         # a fault here costs this advice, never the result
+        log.exception('checking for added caveats failed')
+        added = []
+    if added:
+        warnings['hedged'] = added
     return warnings
+
+
+# Words that make a claim less sure. cleanse.txt tells the model not to add them; this checks it.
+# Lower case: "May 3" is a date, so a "may" before a number does not count.
+HEDGES = re.compile(r",\s*(?:though|although)\b|\balthough\b|\bdepend(?:s|ing)? on\b|\bit depends\b"
+                    r"|\bvar(?:y|ies|ying)\b|\b(?:may|might)\b(?!\s+\d)|\bgenerally\b|\bnot necessarily\b"
+                    r"|\bneeds? (?:further )?verification\b|\bshould be (?:verified|confirmed|checked)\b"
+                    r"|\brather than\b[^.!?\n]{0,60}\balone\b|\bin (?:many|most|some) cases\b")
+HEDGE_PAIRS = 250_000     # draft sentences times rewrite sentences one check may compare
+_STOP = frozenset('the a an and or of to in on for with is are was be it this that you your we our at as '
+                  'by from but if not have has will can so they their them its than then when what which '
+                  'who how about into more most some such also just only very'.split())
+
+
+def _sentences(text):
+    """The sentences of a text's prose that have 4 words or more."""
+    prose = deslop.markdown_prose(checkable(text))
+    return [s.strip() for s in re.split(r'(?<=[.!?])\s+|\n+', prose) if len(s.split()) >= 4]
+
+
+def _content(sentence):
+    """A sentence's words of 4 letters or more, its hedges and common words left out, each
+    with a trailing s stripped, so that "roles" and "role" are one word."""
+    words = re.findall(r"[a-z][a-z'-]{3,}", HEDGES.sub(' ', sentence.lower()))
+    return {w.rstrip('s') for w in words if w not in _STOP}
+
+
+def _hedges(sentence):
+    """The HEDGES in a sentence, counted: ", though" counts as "though"."""
+    return collections.Counter(' '.join(m.lstrip(',').split()) for m in HEDGES.findall(sentence.lower()))
+
+
+def hedged(draft, rewrite):
+    """The rewrite's sentences that add a caveat the draft did not have, as
+    [sentence, 'added: though, varies'] pairs, at most 6.
+
+    Each rewrite sentence is paired with the draft sentence that shares the most words with
+    it, measured against the shorter of the two: at least 2 words and 0.4. It is listed when
+    it holds more HEDGES than that sentence. A misaligned pair can be listed wrongly, so this
+    is advice only. ponytail: a long text is not checked.
+    """
+    mine, theirs = _sentences(draft), _sentences(rewrite)
+    if len(mine) * len(theirs) > HEDGE_PAIRS:
+        return []
+    words = [_content(s) for s in mine]
+    found = []
+    for sentence in theirs:
+        own = _content(sentence)
+        if len(own) < 2:
+            continue
+        best, score = None, 0.0
+        for i, other in enumerate(words):
+            shared = len(own & other)
+            if shared >= 2 and shared / min(len(own), len(other)) > score:
+                best, score = i, shared / min(len(own), len(other))
+        if best is None or score < 0.4:
+            continue
+        now, was = _hedges(sentence), _hedges(mine[best])
+        if sum(now.values()) > sum(was.values()):
+            found.append([sentence[:160], 'added: ' + ', '.join((now - was).elements())])
+            if len(found) == 6:
+                break
+    return found
 
 
 # ── what the rewrite changed ─────────────────────────────────────────────────
@@ -1374,9 +1529,11 @@ HOTKEY = (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, ord('U'))
 WM_QUIT, WM_HOTKEY = 0x0012, 0x0312
 EVENT_WAIT = 25          # seconds a GET /api/events waits for something to happen
 EVENT_LIFE = 60          # seconds an event waits for the page before it is dropped
+EVENT_HANDOFF = 1.0      # seconds an event waits for the window last in front, before any takes it
 
 _events = []                          # (when, event) for the page, taken by GET /api/events
 _events_cond = threading.Condition()
+_front = {'page': ''}                 # the id of the page whose window last had the focus
 _hotkey = {'keys': None, 'state': 'off', 'thread': None, 'tid': 0}
 _hotkey_lock = threading.Lock()
 
@@ -1389,14 +1546,27 @@ def queue_event(event):
         _events_cond.notify_all()
 
 
-def take_events(stop, gone=lambda: False):
+def take_events(stop, gone=lambda: False, page=''):
     """The events for the page, each handed out once, waiting up to EVENT_WAIT seconds for one.
 
     `gone` says the page that asked is no longer there. A reload leaves the old page's
     request waiting here, and what it took would be lost with it.
+
+    With two windows open, the one the user was in last takes a press. Another window takes
+    it only after EVENT_HANDOFF, in case that one has been closed.
     """
+    def ready():
+        return stop.is_set() or bool(_events) and (
+            _front['page'] in ('', page) or time.monotonic() - _events[0][0] >= EVENT_HANDOFF)
+
     with _events_cond:
-        _events_cond.wait_for(lambda: _events or stop.is_set(), EVENT_WAIT)
+        end = time.monotonic() + EVENT_WAIT
+        while not ready():
+            left = end - time.monotonic()
+            if left <= 0:
+                break
+            # With a press waiting for another window, wake again when it becomes this one's.
+            _events_cond.wait(min(left, EVENT_HANDOFF) if _events else left)
         if gone():
             return []
         now = time.monotonic()
@@ -1591,7 +1761,22 @@ def cut_of(draft, reply):
     return bool(rest) and deslop.chat_reply(rest[0])
 
 
-def rewrite(text, before, engine, context, cancel, emit, system, keep=False):
+def fresh_notes(notes, said):
+    """The notes in `said` not already in `notes`. A model often says the same thing each
+    round; case, spacing and the full stop at the end do not make a note new."""
+    def key(note):
+        return ' '.join(str(note).lower().split()).rstrip('.!;: ')
+
+    seen = {key(note) for note in notes}
+    fresh = []
+    for note in said:
+        if key(note) not in seen:
+            seen.add(key(note))
+            fresh.append(note)
+    return fresh
+
+
+def rewrite(text, before, engine, context, cancel, emit, system, keep=False, fold=False):
     """The round loop on one text: up to MAX_ROUNDS model calls, each one checked.
 
     Returns the best candidate, {'text', 'check', 'notes', 'rounds', 'marked', 'stopped'},
@@ -1601,9 +1786,11 @@ def rewrite(text, before, engine, context, cancel, emit, system, keep=False):
     rounds ended early because one left as much flagged as a round before it, 'kept' when
     the model sent back unchanged the still-flagged text that is returned, 'added' when the
     draft had nothing flagged and every round added something, so the draft is returned,
-    else ''. `rounds` counts the rounds that finished.
+    else ''. `rounds` counts the rounds that finished. With `fold`, round one asks for this
+    text's own bold run-in labels to be folded, when it has enough of them.
     """
-    proof = [h['label'] for c in before['categories'] if c['key'] == 'proof' for h in c['hits']]
+    labels = bold_labels(text) if fold else []
+    proof =[h['label'] for c in before['categories'] if c['key'] == 'proof' for h in c['hits']]
     drafted = {hit_key(c, h) for c in before['categories'] for h in c['hits']}
     copy, result, notes, best, marked = text, before, [], None, True
     want, again, shape = len(blocks_of(text)), '', shape_of(text)
@@ -1620,8 +1807,8 @@ def rewrite(text, before, engine, context, cancel, emit, system, keep=False):
         sent = copy
         try:
             # "First" until a round is accepted: a reply sent back for its shape edited nothing.
-            reply = call_model(system, user_message(copy, result, proof, context, best is None, keep, again, drafted),
-                               engine, cancel, emit)
+            reply = call_model(system, user_message(copy, result, proof, context, best is None, keep, again, drafted,
+                                                    labels), engine, cancel, emit)
             new, said, found = split_reply(reply)
             checked = check(new)
             if cancel.is_set():               # Stop pressed while the reply was checked
@@ -1662,7 +1849,7 @@ def rewrite(text, before, engine, context, cancel, emit, system, keep=False):
         stuck = fewest is not None and flags >= fewest
         fewest = flags if fewest is None else min(fewest, flags)
         marked = marked and found             # a later round keeps an earlier round's stray notes
-        notes += said
+        notes += fresh_notes(notes, said)
         emit({'event': 'checked', 'round': n, 'check': result})
         flagged = sum(1 for c in result['categories'] if c['hits'] and not c['advisory'])
         if best is None or flagged <= best['flagged']:      # a later round wins a tie
@@ -1689,7 +1876,7 @@ def rewrite(text, before, engine, context, cancel, emit, system, keep=False):
     return best
 
 
-def rewrite_parts(parts, engine, context, cancel, emit, system, keep=False, joins=None):
+def rewrite_parts(parts, engine, context, cancel, emit, system, keep=False, joins=None, fold=False):
     """A long text, one part at a time: (text, notes, most rounds a part took, marked, counts).
 
     A part with nothing flagged is kept as it is, with no model call: over a long document
@@ -1697,8 +1884,9 @@ def rewrite_parts(parts, engine, context, cancel, emit, system, keep=False, join
     is kept as it was and named in the notes, unless nothing has been rewritten yet, which
     means the engine is not working at all.
     After three failures the remaining parts are left alone, and so they are after one failure
-    that says the engine cannot answer at all now (a usage limit, a lapsed sign-in): the parts
-    already rewritten are kept, not thrown away with the run. counts['stopped'] is how many
+    that says the engine cannot answer at all now (a usage limit, a lapsed sign-in, no network,
+    a call out of time): the parts already rewritten are kept, not thrown away with the run.
+    counts['stopped'] is how many
     rewritten parts ended their rounds early because a round fixed nothing. After a failure
     of that second kind, counts['gone'] is its code, so that the page can say what to do.
     """
@@ -1709,7 +1897,9 @@ def rewrite_parts(parts, engine, context, cancel, emit, system, keep=False, join
             raise EngineError('cancelled', STOPPED)
         emit({'event': 'part', 'part': i, 'of': len(parts)})
         before = check(part)
-        if before['clean'] and engine.get('strength') != 'thorough' or counts['failed'] >= 3 or gone:
+        # A part with bold labels to fold is sent even when it passes, as a short text is.
+        passes = before['clean'] and not (fold and bold_labels(part))
+        if passes and engine.get('strength') != 'thorough' or counts['failed'] >= 3 or gone:
             texts.append(part)
             counts['unchanged'] += 1
             continue
@@ -1717,7 +1907,7 @@ def rewrite_parts(parts, engine, context, cancel, emit, system, keep=False, join
             f'This is part {i} of {len(parts)} of one long document. Edit this part only, and '
             'do not add an opening or a closing of your own.')
         try:
-            best = rewrite(part, before, engine, where, cancel, emit, system, keep)
+            best = rewrite(part, before, engine, where, cancel, emit, system, keep, fold)
             if best.get('as_it_was'):
                 raise EngineError('shape', best['notes'][0])
         except EngineError as e:
@@ -1728,8 +1918,10 @@ def rewrite_parts(parts, engine, context, cancel, emit, system, keep=False, join
             texts.append(part)
             counts['failed'] += 1
             problems.append(f'Part {i} could not be rewritten and is unchanged. {e.message}')
+            # A lost network or a call out of time counts too: each CLI retries for minutes
+            # before it gives up, so every part more would cost as long again.
             gone = e.code in ('not_logged_in', 'missing', 'engine_changed', 'cli_old', 'usage_limit',
-                              'bad_model')
+                              'bad_model', 'offline', 'timeout', 'data_folder')
             if gone:
                 counts['gone'] = e.code
                 _status['until'] = _codex_status['until'] = 0     # it may be a login problem, so ask again
@@ -1866,8 +2058,11 @@ def unslop(text, before, engine, context, cancel, emit, auto=False, may_copy=lam
     rewrite must have the same blocks, in the same order.
     """
     started = time.monotonic()
+    # Bold labels are looked for in the whole text, so a long document with headings is not
+    # asked about part by part. A Word file keeps its bold.
+    fold = not keep and bool(bold_labels(text))
     # Thorough is a request for a real rewrite, which a text that passes still gets.
-    if auto and before['clean'] and not placeholders(before) and engine.get('strength') != 'thorough':
+    if auto and before['clean'] and not placeholders(before) and not fold and engine.get('strength') != 'thorough':
         log.info('run skipped: already passes, words=%d score=%s', before['words'], before['score'])
         emit({'event': 'done', 'text': text, 'notes': [], 'before': before, 'after': before,
               'warnings': carried(text, text), 'copied': False, 'rounds': 0,
@@ -1877,12 +2072,12 @@ def unslop(text, before, engine, context, cancel, emit, auto=False, may_copy=lam
     joins = []
     parts, counts = split_parts(text, whole=keep, joins=joins), None
     if len(parts) == 1:
-        best = rewrite(text, before, engine, context, cancel, emit, system, keep)
+        best = rewrite(text, before, engine, context, cancel, emit, system, keep, fold)
         out, after, notes = best['text'], best['check'], best['notes']
         rounds, marked, stopped = best['rounds'], best['marked'], best['stopped']
     else:
         out, notes, rounds, marked, counts = rewrite_parts(parts, engine, context, cancel, emit,
-                                                           system, keep, joins)
+                                                           system, keep, joins, fold)
         after = check(out)
         stopped = counts['stopped']           # for the log: how many parts stopped early
     model = engine.get('seen') or engine['model']      # ChatGPT's default is named once it answers
@@ -1918,6 +2113,8 @@ def unslop(text, before, engine, context, cancel, emit, auto=False, may_copy=lam
         done['stopped'] = stopped
     if change:
         done['changes'] = change
+    if fold and labels_left(out):
+        done['labels_left'] = labels_left(out)   # the page says they paste with their asterisks
     # One line per run, for working out later how runs went. Counts and scores only: never
     # the text, the notes or what the checker flagged in it.
     log.info('run done: engine=%s model=%s strength=%s instructions=%s rounds=%d stopped=%s parts=%s '
@@ -1943,6 +2140,17 @@ class Handler(BaseHTTPRequestHandler):
         # pythonw has no stderr for the default to write to. ascii() because the request
         # line is whatever the client sent, control characters included.
         log.info('%s', ascii(fmt % args))
+
+    # An open page asks for events every 25 seconds and checks the text at each pause in
+    # typing. Logged, those answers would push the runs out of the log within days. Refusals
+    # and errors are still logged, and each run has its own line.
+    QUIET = (('GET', '/api/events'), ('GET', '/api/status'), ('POST', '/api/check'), ('POST', '/api/front'))
+
+    def log_request(self, code='-', size='-'):
+        if isinstance(code, int) and 200 <= code < 300 and (
+                getattr(self, 'command', ''), str(getattr(self, 'path', '')).split('?')[0]) in self.QUIET:
+            return
+        super().log_request(code, size)
 
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store')
@@ -2049,8 +2257,21 @@ class Handler(BaseHTTPRequestHandler):
         elif where == ('GET', '/api/events'):
             # A long poll: the page asks again as soon as this answers. Shutdown wakes it. The
             # page sends nothing more on this connection, so a readable socket is a closed one.
+            page = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('page', [''])[0]
             self.send(200, {'events': take_events(self.server.stop, lambda: select.select(
-                [self.connection], [], [], 0)[0])})
+                [self.connection], [], [], 0)[0], page[:64])})
+        elif where == ('POST', '/api/front'):
+            # The page whose window just took the focus: the next Ctrl+Alt+U goes to it.
+            try:
+                data = json.loads(body)
+            except (ValueError, RecursionError):
+                data = None
+            if not isinstance(data, dict) or not isinstance(data.get('page'), str):
+                return self.fail(400, 'bad_request', 'Send a JSON object with "page" set to a string.')
+            with _events_cond:
+                _front['page'] = data['page'][:64]
+                _events_cond.notify_all()
+            self.send(200, {})
         elif where == ('POST', '/api/hotkey'):
             try:
                 data = json.loads(body)
@@ -2076,6 +2297,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.fail(413, 'too_long', TOO_LONG)
             reply = check(data['text'])
             reply['warnings'] = carried(draft, data['text'])
+            # Bold labels a paragraph put back brought with it: the page says they paste with
+            # their asterisks, as it does for those a run left. Counted as the run counts them.
+            reply['labels_left'] = labels_left(data['text'])
             self.send(200, reply)
         elif where == ('POST', '/api/unslop'):
             data = self.text_request(body)
@@ -2352,9 +2576,32 @@ def launch_window(url):
          '--disable-features=msImplicitSignin,OptimizationHints', '--disable-sync',
          '--disable-component-update',
          '--no-first-run', '--no-default-browser-check', '--disable-background-mode',
-         '--hide-crash-restore-bubble', '--window-size=1180,820'],
+         '--hide-crash-restore-bubble'] + window_flags(profile),
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return True
+
+
+def window_flags(profile):
+    """The window's size from last time, as flags: maximised, its width and height, or the
+    1180x820 a new profile starts with.
+
+    The browser keeps the app window's place in Preferences but never reads it back for this
+    address: it writes the name "127.0.0.1_/" with each dot as a level of nesting, and looks it
+    up as one flat key. So the place is read here, at the nested path. The position is left
+    out: a place on a screen that has since been unplugged would open the window off screen.
+    """
+    try:
+        with open(os.path.join(profile, 'Default', 'Preferences'), encoding='utf-8') as fh:
+            place = json.load(fh)['browser']['app_window_placement']['127']['0']['0']['1_/']
+        if place.get('maximized') is True:
+            return ['--start-maximized']      # a size or position flag would undo it
+        width = int(place['right']) - int(place['left'])
+        height = int(place['bottom']) - int(place['top'])
+        if 400 <= width <= 10000 and 300 <= height <= 10000:
+            return [f'--window-size={width},{height}']
+    except Exception:
+        pass
+    return ['--window-size=1180,820']
 
 
 def watch_window(stop):
@@ -2421,8 +2668,9 @@ def write_instance(path, port, key):
     account shares 127.0.0.1, and any program can answer a ping, so the key is how a launch
     tells this account's copy from everything else.
     """
-    fd, part = tempfile.mkstemp(prefix='instance.', suffix='.tmp', dir=os.path.dirname(path))
+    part = None
     try:
+        fd, part = tempfile.mkstemp(prefix='instance.', suffix='.tmp', dir=os.path.dirname(path))
         with os.fdopen(fd, 'w', encoding='utf-8') as fh:
             json.dump({'port': port, 'key': key.hex()}, fh)
         for attempt in range(10):         # a launch reading it holds it for a moment
@@ -2435,8 +2683,9 @@ def write_instance(path, port, key):
                 time.sleep(0.05)
     except OSError as e:
         log.warning('instance.json could not be written, so a second launch will not find this copy: %r', e)
-        with contextlib.suppress(OSError):
-            os.remove(part)
+        if part:
+            with contextlib.suppress(OSError):
+                os.remove(part)
 
 
 def forget_instance(path, key):
@@ -2507,6 +2756,17 @@ def already_running(port):
     return running_copy(port) is True
 
 
+def port_held(port):
+    """Does something hold this port? A bind tells at once. A ping to a port nobody holds
+    takes Windows two seconds to refuse, as after a crash left instance.json behind."""
+    with socket.socket() as probe:
+        try:
+            probe.bind(('127.0.0.1', port))
+        except OSError as err:
+            return err.errno == errno.EADDRINUSE
+    return False
+
+
 def bind_soon(port):
     """bind(port), tried for a second. None if it stays taken."""
     for _ in range(10):
@@ -2544,7 +2804,7 @@ def serve(port=PORT, open_window=True, hotkey=None):
     # The port instance.json names first: when every port below was taken, the copy took
     # any free one, and this is the only way to find it.
     held = read_instance() if port else None
-    if held and running_copy(held[0]) is True:
+    if held and port_held(held[0]) and running_copy(held[0]) is True:
         return join(held[0])
     # PORT, or when something else has it, the first free one of the few after it: a second
     # launch has to find the first, and the page keeps its settings per port. Each one is
@@ -2582,6 +2842,7 @@ def serve(port=PORT, open_window=True, hotkey=None):
     httpd.key = secrets.token_bytes(32)
     noted = os.path.join(DATA_DIR, 'instance.json')
     write_instance(noted, httpd.server_address[1], httpd.key)
+    sweep_runs()                              # this copy owns DATA_DIR from here
     windowed = open_window and launch_window(url)
     if open_window and not windowed:
         hotkey = None                         # a tab: its closing tells this process nothing
@@ -2589,6 +2850,7 @@ def serve(port=PORT, open_window=True, hotkey=None):
         _hotkey.update(keys=hotkey, state='off', thread=None)
     with _events_cond:
         _events.clear()
+        _front['page'] = ''
     log.info('serving %s', url)
     if not open_window:
         print(f'SlopMonster is running at {url}', flush=True)
@@ -2651,6 +2913,34 @@ def attach_console():
     finally:
         k.CloseHandle(ctypes.c_void_p(snap))
     return bool(found and k.AttachConsole(entry.ppid))
+
+
+def sweep_runs(age=TIMEOUT + 60):
+    """Remove the codex-* work folders and prompt-*.txt files of runs that never finished.
+    Finally blocks remove them, which a copy ended from Task Manager or by a forced restart
+    never reaches. One younger than the longest run may belong to a copy still stopping."""
+    try:
+        names = os.listdir(DATA_DIR)
+    except OSError:
+        return []
+    swept = []
+    for name in names:
+        path = os.path.join(DATA_DIR, name)
+        if not re.fullmatch(r'codex-\w{8}|prompt-\w{8}\.txt', name):
+            continue
+        try:
+            if time.time() - os.path.getmtime(path) < age:
+                continue
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+        except OSError:
+            continue                          # held open: the next start tries again
+        swept.append(name)
+    if swept:
+        log.info('removed what %d unfinished runs left behind', len(swept))
+    return swept
 
 
 def sweep_unpacked(own, age=600):

@@ -26,7 +26,8 @@ for Windows 10 or 11. It needs Claude Code or the Codex CLI, signed in; see
 - **The other company's AI does the rewrite.** Choose ChatGPT (through OpenAI's Codex
   CLI) or Claude (through Claude Code) in Settings. Send Claude's drafts to ChatGPT and
   ChatGPT's drafts to Claude, so the rewrite is not a model checking its own habits. Each
-  run counts against your own ChatGPT or Claude plan.
+  run counts against your own ChatGPT or Claude plan. Try with Claude, or Try with
+  ChatGPT, sends the same text once to the other AI and leaves your choice in Settings as it is.
 - **Light or Thorough.** Light makes small edits and fixes each thing the checker flagged.
   Thorough also goes through the text sentence by sentence and rewrites what still reads as
   machine-written, using SlopMonster's two editing guides.
@@ -37,7 +38,8 @@ for Windows 10 or 11. It needs Claude Code or the Codex CLI, signed in; see
   the new ones highlighted. Keep original puts one paragraph back as you wrote it.
 - **Checks before you copy.** Under the result, SlopMonster lists any number, link, email
   address or `[placeholder]` that differs between your text and the rewrite, so a changed
-  price or a dropped link is easy to spot.
+  price or a dropped link is easy to spot. It also names any sentence the rewrite made
+  less sure than your text, such as one with a new `may` or `depending on`.
 - **A dark theme and a light one.** The button beside Settings switches between them.
 
 ![SlopMonster in the light theme after a run](docs/img/app-light.png)
@@ -111,7 +113,10 @@ signed in to the Claude or ChatGPT desktop app does not sign the command-line to
 4. Paste a draft with Ctrl+V and press **Unslop**, or Ctrl+Enter.
 5. Read the result and the notes under it, then press **Copy text**, or **Save as Word**
    for a file.
-6. **Turn off**, or closing the window, stops SlopMonster.
+6. **Turn off**, or closing the window, stops SlopMonster, and Ctrl+Alt+U with it. To keep
+   Ctrl+Alt+U working, minimise the window instead. To have SlopMonster start when you
+   sign in to Windows, press Win+R, type `shell:startup` and put a shortcut to
+   `SlopMonster.exe` in the folder that opens.
 
 The full guide, including every switch and how Word files are handled, is in
 [app/README.md](app/README.md).
@@ -145,7 +150,8 @@ powershell -ExecutionPolicy Bypass -File app\make-shortcut.ps1
 ```
 
 The script puts a SlopMonster shortcut on the Desktop and in the Start Menu, which starts
-`app\server.py` with no console window.
+`app\server.py` with no console window. Add `-Startup` to put one in the Startup folder
+too, so SlopMonster starts when you sign in to Windows.
 
 To build `SlopMonster.exe` yourself:
 

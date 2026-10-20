@@ -105,22 +105,35 @@ powershell -ExecutionPolicy Bypass -File app\make-shortcut.ps1
 ```
 
 This puts a SlopMonster shortcut on the Desktop and in the Start Menu. Run it again if
-you move the folder.
+you move the folder. To have SlopMonster start when you sign in to Windows, run the script
+with `-Startup`. It also puts the shortcut in your Startup folder.
 
 ## Use
 
 1. Open SlopMonster from the shortcut. A window opens with no console behind it.
 2. Press Ctrl+V anywhere in the window. The left pane shows the score and what the
-   checker flagged. With the automatic switch on, the rewrite starts by itself.
+   checker flagged. A flagged sentence pattern shows the words of yours that matched it;
+   hold the pointer over them for the rule. With the automatic switch on, the rewrite
+   starts by itself.
 3. When the run finishes, focus is on Copy, so Enter copies the result.
 4. Turn off stops the background process and closes the window. Closing the app window
-   with the X does the same.
+   with the X does the same, and Ctrl+Alt+U stops working with it. Minimise the window to
+   keep Ctrl+Alt+U working.
 
-Esc during a run goes back to the last result, and Ctrl+Z brings back the text that a
+Esc during a run goes back to the last result, Ctrl+Shift+Enter sends the same text
+once to the other AI (see Try with Claude below), and Ctrl+Z brings back the text that a
 paste, an opened file or Clear replaced. The results of this session are listed above
-the result. They are kept in memory only and are gone when you turn SlopMonster off.
-Ctrl+Z cannot undo a replacement when either text is over 100,000 characters, or when
-the new text is over 400 lines.
+the result, each with the AI that wrote it and its score. They are kept in memory only
+and are gone when you turn SlopMonster off. A reload empties them too, so while there is
+text in the box or a result, the first F5 or Ctrl+R only says so; press it again within
+4 seconds to reload. The window opens at the size it had last time, or maximised if it
+was. Ctrl+Z cannot undo a replacement when either text is over 100,000 characters, or when
+the new text is over 400 lines. It goes back through 20 replacements at most, and through
+only the last one when the text that one replaced is over 20,000 characters.
+
+What you type in Where it will appear goes with every run until you clear it, Ctrl+Alt+U
+runs included. The window names it while it applies, and each result names the one it
+was written for. The small × at the end of the field clears it. It is never saved.
 
 A run that starts by itself is skipped or held in four cases. Press Unslop or
 Ctrl+Enter to run it anyway.
@@ -140,6 +153,11 @@ Under the result, the app lists any number, link, email address or `[placeholder
 differs between your text and the rewrite. When something differs, focus stays off Copy
 so that you read the result first.
 
+It also lists, under Less sure than your text, a sentence where the rewrite added a
+caveat that your text did not have, such as `though it varies`, `may` or `depending on`.
+This is advice only and never stops Copy. The words it looks for are `HEDGES` in
+`server.py`.
+
 A whole answer pasted from Claude is flagged for the wording around the draft: an
 opening such as `Here's a draft you can adapt:`, offers to change it, or notes after a
 `---` rule. The rewrite then returns the draft alone. A flagged line that speaks to the
@@ -149,8 +167,19 @@ holds several versions, it keeps the first and names the others in the notes, an
 text stays in the left pane. A number that was only in the deleted wording, such as an
 `Option 2` label or a tip under the draft, is not counted as missing. The result names
 it as left out with the chat reply, and it does not stop Copy when it passes.
+A chat answer with no headings that opens three or more list items or paragraphs with a
+bold label, such as `- **Cost:** ...`, is asked in the first round to fold those labels
+into its sentences, because Copy writes plain text and the asterisks would be pasted too.
+A bold line on its own, such as a title or a price, stays a short line without the asterisks.
+Such an answer is rewritten even when it already passes the checker. A text with
+headings, and a Word file, keep their bold.
 Placeholders such as `[Your Name]` are kept, and the result lists them under Fill these
 in before sending. They never cost a point.
+
+A list of three, such as `faster, smarter, and better`, costs a point but never stops a
+pass. The first round asks the model to vary it unless the list is real. Later rounds
+and Run again do not ask again, and the result lists any that are left under Lists of
+three. The command-line checker in `tools/` still fails a text on them.
 
 Changes, beside the scores, marks what the rewrite changed: your words struck through,
 the new ones highlighted. Keep original puts one paragraph back as you wrote it. The
@@ -187,7 +216,17 @@ Claude. A new install uses ChatGPT when the Codex command-line tool is installed
 signed in with ChatGPT, and Claude otherwise. A Codex signed in with an API key is used
 only after you choose ChatGPT in Settings. The pill at the top of the window names the AI
 the next run goes to, and the line under each result names the AI and model that wrote
-it, such as `Took 12 seconds with ChatGPT (gpt-6.1-sol)`.
+it, such as `Took 12 seconds with ChatGPT (gpt-6.1-sol)`. With Thorough chosen, the pill
+says so too. When one AI's plan reaches its usage limit and the other is signed in, the
+error offers the other AI for that one run, with the button described next.
+
+Try with Claude, or Try with ChatGPT, under a result and on an error rewrites the same
+text once with the other AI. It uses the same strength, the same Where it will appear and
+the same Word file. Ctrl+Shift+Enter does the same. It does not change the choice in
+Settings, its result is never copied for you, and it goes in the list of results beside
+the first. The button shows only when the other AI is signed in. On an error it shows only
+while the box and Where it will appear still hold what failed. When Try with Claude fails,
+Try again asks Claude once more.
 
 Settings, at the top of the window, holds the choices. Each one is kept as you make it,
 in the app window's own browser profile, and goes with the next run.
@@ -238,6 +277,11 @@ clipboard" and names any placeholder such as `[Your Name]` still to fill in, or 
 that the rewrite needs a look. Click it to bring the window up. Without notifications,
 the window title on the taskbar says how the run ended. A short text, a long one, or one
 that looks like it holds a password is held, as a paste is, until you press Unslop.
+For a short or long text the focus is then on Unslop, so Enter starts it. For a key or a
+password it is not, so an Enter from habit sends nothing.
+
+With two SlopMonster windows open, a press goes to the window you used last. If that
+window has been closed, the other one takes the press a second later.
 
 The switch for it is the last of the four under the checker and is on by default.
 Turned off, SlopMonster lets go of the keys, so another program can use them. If
@@ -387,8 +431,8 @@ example "homepage for a roofing company".
   A second launch opens a window only on a copy that proves it holds that key. It finds
   the copy there even when all five ports were taken, and it never opens a window on
   another program.
-- The log is `%LOCALAPPDATA%\SlopMonster\server.log`. It holds request lines, errors and
-  one line per run with the engine, model, how much to change, whether your own
+- The log is `%LOCALAPPDATA%\SlopMonster\server.log`. It holds request lines (except the
+  page's routine polling and checks that succeeded), errors and one line per run with the engine, model, how much to change, whether your own
   instructions were used, rounds, seconds and scores. Your text is not written to it.
 
 ## Uninstall

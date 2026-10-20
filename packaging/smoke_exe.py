@@ -6,7 +6,9 @@ real data folder and port are never touched, and then over HTTP: the page and it
 /api/status, /api/check, a Word file, a PDF and an AES-locked PDF read in the exe's own child
 process, a Save as Word round trip, the rewrite instructions read, saved and reset, a second
 launch that finds the first copy, the sign-in wrapper, and Turn off. It calls no model, opens
-no window and registers no hotkey. Exits non-zero when a check fails.
+no window and registers no hotkey. First it runs build.ps1 with a stand-in Python, in this
+checkout and in a copy outside git, to check the commit time it hands PyInstaller.
+Exits non-zero when a check fails.
 """
 import http.client
 import json
@@ -95,7 +97,41 @@ def first_line(proc, wait):
     return got[0].decode('utf-8', 'replace').strip() if got else ''
 
 
+def build_epoch():
+    """build.ps1 takes its zip times from the last commit, and builds without them outside a
+    git checkout, such as a source zip. A stand-in Python prints what PyInstaller would get."""
+    tmp = tempfile.mkdtemp(prefix='slop-build-')
+    try:
+        os.makedirs(os.path.join(tmp, 'tree', 'packaging'))
+        script = os.path.join(tmp, 'tree', 'packaging', 'build.ps1')
+        shutil.copyfile(os.path.join(ROOT, 'packaging', 'build.ps1'), script)
+        fake = os.path.join(tmp, 'python.cmd')
+        with open(fake, 'w') as f:
+            f.write('@echo off\nif "%1"=="-m" (echo epoch=[%SOURCE_DATE_EPOCH%]& exit /b 3)\nexit /b 0\n')
+        env = {k: v for k, v in os.environ.items() if k.upper() != 'SOURCE_DATE_EPOCH'}
+        env['GIT_CEILING_DIRECTORIES'] = tmp
+
+        def build(path):
+            run = subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path,
+                                  '-Python', fake], stdin=subprocess.DEVNULL, capture_output=True,
+                                 timeout=120, env=env, creationflags=NO_WINDOW)
+            return (run.stdout + run.stderr).decode('utf-8', 'replace')
+
+        said = build(script)
+        check('build.ps1 outside a git checkout goes on without a commit time',
+              'epoch=[]' in said and 'PyInstaller failed with exit code 3' in said, said[-300:])
+        git = subprocess.run(['git', '-C', ROOT, 'log', '-1', '--format=%ct'], capture_output=True,
+                             text=True, creationflags=NO_WINDOW)
+        if git.returncode == 0 and git.stdout.strip():
+            said = build(os.path.join(ROOT, 'packaging', 'build.ps1'))
+            check('build.ps1 in a git checkout takes the time of the last commit',
+                  f'epoch=[{git.stdout.strip()}]' in said, said[-300:])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
+    build_epoch()
     if not os.path.isfile(EXE):
         raise SystemExit(f'{EXE} was not found. Build it with packaging\\build.ps1 first.')
     tmp = tempfile.mkdtemp(prefix='slop-exe-')

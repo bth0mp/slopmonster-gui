@@ -18,9 +18,10 @@ if (!target) { console.log(`  · the browser did not answer on port ${debug}`); 
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise((r, j) => { ws.addEventListener('open', r); ws.addEventListener('error', j); });
 let id = 0;
-const waiting = new Map(), errors = [], away = [], dialogs = [];
+const waiting = new Map(), errors = [], away = [], dialogs = [], hooks = new Set();
 ws.addEventListener('message', (e) => {
   const m = JSON.parse(e.data);
+  hooks.forEach((hook) => hook(m));
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
   if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text);
   if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && !m.params.frame.url.startsWith(url)) away.push(m.params.frame.url);
@@ -273,6 +274,7 @@ async function results() {
   await waitFor(`document.querySelector('.chg-btn')`);
   const label = () => js(`document.getElementById('view-changes').textContent`);
   const changed = await label();
+  const unkept = await js(`document.querySelector('#history option:checked').textContent`);
   await click('.chg-btn');
   await waitFor(`!document.title.startsWith('Passes')`);
   await sleep(800);
@@ -286,6 +288,25 @@ async function results() {
   await click('#copy');
   copied = await js(`window.__copied.at(-1)`);
   check('Keep original puts the paragraph back into what Copy copies', copied && copied.startsWith('Are you ready') && copied.includes('4,000 customers'), copied);
+  // The list gives the score of the text Copy copies, once it is checked (FINAL-F1).
+  await waitFor(`!document.getElementById('outcome').classList.contains('is-stale')`);
+  const scoreIn = (s) => (/ ([0-5])\/5 /.exec(s || '') || [])[1];
+  const listed = await js(`document.querySelector('#history option:checked').textContent`);
+  const rechecked = await js(`fetch('/api/check', { method: 'POST', headers: { 'Content-Type': 'application/json',
+    'X-Slop-Token': document.querySelector('meta[name=slop-token]').content },
+    body: JSON.stringify({ text: ${JSON.stringify(copied)} }) }).then((r) => r.json()).then((j) => j.score)`);
+  check('... and the list gives the score of that text once it is checked', scoreIn(listed) === String(rechecked), [listed, rechecked]);
+  await click('.chg-btn');
+  await sleep(100);
+  const back = await js(`document.querySelector('#history option:checked').textContent`);
+  check('... and the score of the rewrite again when it is taken back', scoreIn(back) === scoreIn(unkept) && scoreIn(back) !== undefined, [back, unkept]);
+  await click('.chg-btn');
+  await sleep(100);
+  const pending = await js(`document.querySelector('#history option:checked').textContent`);
+  check('... and no score while the text with the paragraph kept is being checked', scoreIn(pending) === undefined, pending);
+  await waitFor(`!document.getElementById('outcome').classList.contains('is-stale')`);
+  await click('.chg-btn');
+  await sleep(100);
   await click('input[name=view][value=result]');
 
   await fresh();
@@ -309,6 +330,47 @@ async function undoLimits() {
   await undo();
   const f = await facts();
   check('Ctrl+Z after a paste of over 400 lines keeps it, and says why', f.main === long && /cannot be brought back/.test(f.hint), f.hint);
+}
+
+// ── A window left open for days: the undo history keeps only the last swaps (SOAK2-1).
+// Each text kept for Ctrl+Z holds DOM nodes that no garbage collection frees, so the count
+// of nodes after a forced collection shows how many swaps are still kept.
+async function undoMemory() {
+  await send('Performance.enable');
+  const nodes = async () => {
+    await send('HeapProfiler.collectGarbage');
+    await sleep(100);
+    const r = await send('Performance.getMetrics');
+    return (r.result?.metrics || []).find((m) => m.name === 'Nodes')?.value;
+  };
+  // 150 lines of about 60 characters: under the 20,000 that make a text large.
+  const text = (n) => Array.from({ length: 150 }, (_, i) => `Swap ${n}, line ${i + 1}, says a few plain words here.`).join('\n');
+  await fresh({}, { 'slop-auto': 'off' });
+  await paste(text(0)); await sleep(100);
+  const base = await nodes();
+  await paste(text(1)); await sleep(100);
+  const one = (await nodes()) - base;   // what one kept swap costs
+  for (let n = 2; n <= 60; n++) await paste(text(n));
+  await sleep(300);
+  const many = (await nodes()) - base;
+  // Kept without a bound, 60 swaps cost 60 times one. The bound is the last 20.
+  check('60 swaps keep no more than about 20 in the undo history', one > 100 && many < one * 30, { base, one, many });
+  await undo();
+  check('... and Ctrl+Z still brings back the text the last one replaced', (await facts()).main === text(59), (await facts()).main.slice(0, 20));
+
+  // Large texts: each swap of one empties the history first, so only the last is kept.
+  const big = (n) => Array.from({ length: 300 }, (_, i) => `Large ${n}, line ${i + 1}, says a good many more plain words than that, to fill it out well.`).join('\n');
+  await fresh({}, { 'slop-auto': 'off' });
+  await paste(big(0)); await sleep(100);
+  const start = await nodes();
+  await paste(big(1)); await sleep(100);
+  const each = (await nodes()) - start;
+  for (let n = 2; n <= 12; n++) await paste(big(n));
+  await sleep(300);
+  const after = (await nodes()) - start;
+  check('12 swaps of texts over 20,000 characters keep about one', each > 200 && after < each * 3, { start, each, after });
+  await undo();
+  check('... and Ctrl+Z still brings back the large text the last one replaced', (await facts()).main === big(11), (await facts()).main.slice(0, 20));
 }
 
 // ── Save as Word writes the rewrite into a copy of the opened file
@@ -458,6 +520,228 @@ async function copiedNote() {
   const shown = await js(`[document.getElementById('outcome-title').textContent, document.getElementById('result').textContent]`);
   check('a rewrite that only adds a pattern to text that passes gives the text back as it was',
     shown[0] === 'Your text is shown as it was.' && shown[1].startsWith('The tool reads one file.'), shown);
+}
+
+// ── a list of three costs a point but never stops a pass (README: "Lists of three")
+async function listsOfThree() {
+  await fresh();
+  await paste('We leverage notes, calls, and emails. The rest of this text is plain and fine.');
+  await done();
+  const shown = JSON.parse(await js(`JSON.stringify({
+    title: document.getElementById('outcome-title').textContent,
+    lists: !document.getElementById('lists').hidden, verify: !document.getElementById('verify').hidden,
+    chips: Array.from(document.querySelectorAll('#lists-hits .hit')).map((h) => h.textContent),
+    row: Array.from(document.querySelectorAll('#cats .cat')).map((r) => r.querySelector('.cat-title').textContent + ': ' + r.querySelector('.cat-state').textContent)
+      .find((s) => s.startsWith('Three-item lists')) || '' })`));
+  check('a list of three left in the rewrite: it passes after 1 round', shown.title.startsWith('Passes the checker after 1 round'), shown);
+  check('... the list is shown under Lists of three, not Verify these claims',
+    shown.lists && !shown.verify && shown.chips.length === 1 && shown.chips[0].includes('notes, calls, and emails'), shown);
+  check('... and the left pane calls it optional', / optional$/.test(shown.row), shown.row);
+
+  // A chat answer's bold labels left in the rewrite would paste with their asterisks.
+  await fresh();
+  await paste('Here is the plan for a seamless handover.\n\n- **Cost:** It costs little this year.\n- **Speed:** It takes one week.\n- **Support:** Our own team answers calls.');
+  await done();
+  const meta = await js(`document.getElementById('outcome-meta').textContent`);
+  check('bold labels left in the rewrite are named under the title', meta.includes('3 bold labels are still in the text.'), meta);
+
+  // Labels the rewrite folded, put back by Keep original, are named too: Copy pastes them with asterisks.
+  await fresh();
+  await paste('Here is the plan for a robust launch.\n\n- **Budget:** We spend little on it this year.\n- **Timing:** We start in May.\n- **Owner:** Our team runs it.');
+  await done();
+  const metaNow = () => js(`document.getElementById('outcome-meta').textContent`);
+  check('bold labels the rewrite folded are not named', !(await metaNow()).includes('bold label'), await metaNow());
+  await click('input[name=view][value=changes]');
+  await waitFor(`document.querySelectorAll('.chg-btn').length === 2`);
+  await js(`(() => { const b = document.querySelectorAll('.chg-btn'); b[b.length - 1].click(); return true })()`);
+  await waitFor(`document.getElementById('outcome-meta').textContent.includes('bold label')`, 5000);
+  check('... and are named once Keep original puts them back', (await metaNow()).includes('3 bold labels are still in the text.'), await metaNow());
+  await js(`(() => { const b = document.querySelectorAll('.chg-btn'); b[b.length - 1].click(); return true })()`);
+  await sleep(500);
+  check('... and no longer once Use the rewrite folds them again', !(await metaNow()).includes('bold label'), await metaNow());
+  await click('input[name=view][value=result]');
+}
+
+// ── a caveat the rewrite added is named under Less sure than your text, and stops nothing
+async function lessSure() {
+  await fresh();
+  await paste('Our robust backups run every night at two.');
+  await done();
+  await sleep(300);
+  const f = await facts();
+  const shown = JSON.parse(await js(`JSON.stringify({ hedged: !document.getElementById('hedged').hidden,
+    carried: !document.getElementById('carried').hidden,
+    chips: Array.from(document.querySelectorAll('#hedged-hits .hit')).map((h) => h.textContent) })`));
+  check('an added caveat is listed under Less sure than your text', shown.hedged && shown.chips.length === 1
+    && shown.chips[0].includes('generally') && !shown.carried, shown);
+  check('... and it stops nothing: the title passes and the focus is on Copy', f.title.startsWith('Passes') && f.focus === 'copy', f);
+
+  const draft = 'Our robust backups run every night at two.';
+  await fresh({ clipboard: draft });
+  await js(`(() => { document.hasFocus = () => false; window.__notes = [];
+    window.Notification = function (t, o) { window.__notes.push({ t, body: o.body }); this.close = () => {}; };
+    window.Notification.permission = 'granted'; return true })()`);
+  writeFileSync(path.join(tmp, 'hotkey.txt'), draft);
+  await done();
+  await sleep(300);
+  const notes = await js('window.__notes');
+  check('... a copied result\'s notification says so', notes.length === 1 && notes[0].body.endsWith('1 sentence is less sure than yours.'), notes);
+}
+
+// ── Where it will appear goes with every run, so the window names it while it applies
+async function contextShown() {
+  const seen = () => js(`JSON.stringify({ idle: document.getElementById('idle-note').textContent, meta: document.getElementById('outcome-meta').textContent,
+    value: document.getElementById('context').value, clear: !document.getElementById('context-clear').hidden,
+    focus: document.activeElement && document.activeElement.id })`).then(JSON.parse);
+  await fresh();
+  let s = await seen();
+  check('no context: no Clear button and no mention of one', !s.clear && !/written for/i.test(s.idle), s);
+  await paste(SLOP);
+  await done();
+  s = await seen();
+  check('no context: the result does not say what it was written for', !/Written for/.test(s.meta), s.meta);
+
+  await fresh();
+  await js(`(() => { const c = document.getElementById('context'); c.focus(); c.value = 'homepage for a roofing company';
+    c.dispatchEvent(new Event('input', { bubbles: true })); return true })()`);
+  s = await seen();
+  check('a context: the idle note names it, Ctrl+Alt+U runs included, and Clear shows',
+    s.idle.endsWith('Runs are written for "homepage for a roofing company", Ctrl+Alt+U runs included.') && s.clear, s);
+  await paste(SLOP);
+  await waitFor(`document.documentElement.dataset.run === 'working'`);
+  const working = await js(`document.getElementById('work-note').textContent`);
+  check('... the working note names it', working.endsWith('Written for: "homepage for a roofing company".'), working);
+  await done();
+  s = await seen();
+  check('... and so does the result', s.meta.endsWith('Written for: "homepage for a roofing company".'), s.meta);
+  await click('#context-clear');
+  await sleep(200);
+  s = await seen();
+  check('Clear empties the field, hides itself, and puts the focus in the field', s.value === '' && !s.clear && s.focus === 'context', s);
+  check('... and the idle note no longer names it', !/written for/i.test(s.idle), s.idle);
+
+  // A long one is cut under the result title, so that it leaves the result its room.
+  const long = 'the spring newsletter for a roofing company in a small town, read by homeowners and builders. '.repeat(3).trim();
+  await js(`(() => { const c = document.getElementById('context'); c.value = ${JSON.stringify(long)};
+    c.dispatchEvent(new Event('input', { bubbles: true })); return true })()`);
+  await paste(SLOP + ' Once more.');
+  await done();
+  s = await seen();
+  const cut = Array.from(long).slice(0, 80).join('').trimEnd() + '…';
+  const tip = await js(`document.getElementById('outcome-meta').title`);
+  check('a long context is cut to 80 characters under the result title', s.meta.endsWith('Written for: "' + cut + '".'), s.meta);
+  check('... with the whole of it in the tooltip', tip === 'Written for: ' + long, tip);
+}
+
+// ── Try with the other AI: one run with it, the choice in Settings untouched (README: "Try with Claude")
+async function otherEngine() {
+  const copiesFile = path.join(tmp, 'copies.txt');
+  const copies = () => existsSync(copiesFile) ? readFileSync(copiesFile, 'utf8').split('\n').filter(Boolean).length : 0;
+  const shown = () => js(`JSON.stringify({ other: !document.getElementById('other').hidden, otherText: document.getElementById('other').textContent,
+    errOther: !document.getElementById('err-other').hidden, errOtherText: document.getElementById('err-other').textContent,
+    history: Array.from(document.querySelectorAll('#history option')).filter((o) => !o.hidden).map((o) => o.textContent) })`).then(JSON.parse);
+  const gpt = { 'slop-engine': 'chatgpt' };
+
+  await fresh({}, gpt);
+  await paste(SLOP);
+  await done();
+  let s = await shown();
+  check('a ChatGPT result offers Try with Claude', s.other && s.otherText === 'Try with Claude', s);
+  let c0 = calls().length;
+  await click('#other');
+  await waitFor(`document.documentElement.dataset.run === 'working'`);
+  await done();
+  let f = await facts();
+  s = await shown();
+  check('Try with Claude: the run goes to Claude', calls().length === c0 + 1 && calls().at(-1).engine === 'claude', calls().slice(c0));
+  check('... the choice in Settings, its storage and the pill stay ChatGPT', f.stored === 'chatgpt' && f.engine === 'chatgpt' && f.pill.startsWith('ChatGPT'), f);
+  check('... both results are listed, one named Claude', s.history.length === 2 && s.history.filter((l) => / · Claude( [0-5]\/5)? · /.test(l)).length === 1, s.history);
+  check('... and the box holds the draft, not the rewrite', f.main === SLOP, f.main);
+  check('... and the Claude result offers ChatGPT back', s.other && s.otherText === 'Try with ChatGPT', s);
+
+  await typeMain('Some other words I typed into the box after the run.');
+  await sleep(500);
+  c0 = calls().length;
+  await click('#other');
+  await done();
+  f = await facts();
+  check('Try with the other AI after an edit sends the result\'s own draft', f.main === SLOP && calls().length === c0 + 1 && calls().at(-1).engine === 'chatgpt', [f.main, calls().slice(c0)]);
+
+  // Ctrl+Alt+U copies its own result, but never one from Try with the other AI.
+  await fresh({ clipboard: SLOP }, gpt);
+  await js(`(() => { document.hasFocus = () => false; window.__notes = [];
+    window.Notification = function (t, o) { window.__notes.push({ t, body: o.body }); this.close = () => {}; };
+    window.Notification.permission = 'granted'; return true })()`);
+  const earlier = copies();
+  writeFileSync(path.join(tmp, 'hotkey.txt'), SLOP);
+  await done();
+  await sleep(300);
+  const copied = copies() - earlier, noted = (await js('window.__notes')).length;
+  c0 = calls().length;
+  await click('#other');
+  await waitFor(`document.documentElement.dataset.run === 'working'`);
+  await done();
+  await sleep(300);
+  check('after a hotkey run, Try with Claude makes a call', calls().length === c0 + 1 && calls().at(-1).engine === 'claude', calls().slice(c0));
+  check('... and its result is neither copied nor notified', copied === 1 && copies() === earlier + copied && (await js('window.__notes')).length === noted, [earlier, copied, copies(), noted]);
+
+  await fresh({ fail: 'usage_limit', fail_engine: 'chatgpt', delay: 0.2 }, gpt);
+  await paste(SLOP);
+  await waitFor(`document.documentElement.dataset.run === 'error'`);
+  s = await shown();
+  check('a ChatGPT usage limit offers Try with Claude', s.errOther && s.errOtherText === 'Try with Claude', s);
+  // Try again runs what the box and Where it will appear hold now, so Try with Claude goes
+  // while they no longer hold what failed: the two buttons never run different texts.
+  const setContext = (v) => js(`(() => { const c = document.getElementById('context'); c.value = ${JSON.stringify(v)};
+    c.dispatchEvent(new Event('input', { bubbles: true })); return true })()`);
+  await typeMain(SLOP + ' Edited after the error.');
+  s = await shown();
+  check('... an edit in the box hides it', !s.errOther, s);
+  await typeMain(SLOP);
+  await setContext('a clinic newsletter');
+  s = await shown();
+  check('... and so does a new Where it will appear', !s.errOther, s);
+  await setContext('');
+  s = await shown();
+  check('... and it is back with the text that failed', s.errOther, s);
+  c0 = calls().length;
+  await key('Enter', 'Enter', 13, '\r', 2 | 8);
+  check('... and Ctrl+Shift+Enter runs it with Claude', await done() && calls().length === c0 + 1 && calls().at(-1).engine === 'claude', calls().slice(c0));
+
+  // Try with Claude fails: the error names Claude, and Try again goes to Claude, not to ChatGPT.
+  await fresh({}, gpt);
+  await paste(SLOP);
+  await done();
+  control({ fail: 'usage_limit', fail_engine: 'claude', delay: 0.2 });
+  await click('#other');
+  await waitFor(`document.documentElement.dataset.run === 'error'`);
+  s = await shown();
+  const errTitle = await js(`document.getElementById('err-title').textContent`);
+  check('a failed Try with Claude names Claude and offers ChatGPT back', errTitle.startsWith('Claude') && s.errOther && s.errOtherText === 'Try with ChatGPT', [errTitle, s]);
+  c0 = calls().length;
+  await click('#err-action');
+  for (const end = Date.now() + 5000; Date.now() < end && calls().length === c0; ) await sleep(100);
+  await waitFor(`document.documentElement.dataset.run === 'error'`);
+  f = await facts();
+  check('... and Try again runs it with Claude once more', calls().length === c0 + 1 && calls().at(-1).engine === 'claude', calls().slice(c0));
+  check('... the choice in Settings still ChatGPT', f.stored === 'chatgpt' && f.engine === 'chatgpt', f);
+
+  await fresh({ claude: 'login' }, gpt);
+  await paste(SLOP);
+  await done();
+  s = await shown();
+  check('Claude signed out: no Try with Claude under the result', !s.other, s);
+  control({ claude: 'login', fail: 'usage_limit', fail_engine: 'chatgpt', delay: 0.2 });
+  await paste(SLOP + ' Again.');
+  await waitFor(`document.documentElement.dataset.run === 'error'`);
+  s = await shown();
+  check('... nor on the error', !s.errOther && (await js(`document.getElementById('err-title').textContent`)).includes('usage limit'), s);
+
+  await fresh({ fail: 'cancelled', delay: 0.2 }, gpt);
+  await paste(SLOP);
+  await waitFor(`document.documentElement.dataset.run === 'error'`);
+  s = await shown();
+  check('a run stopped from another window offers no other AI', !s.errOther && (await js(`document.getElementById('err-title').textContent`)) === 'This run was stopped', s);
 }
 
 // ── engine failures, text with nothing to rewrite, right-to-left text (FR-1, FR-2, FR-4, FR-5)
@@ -623,9 +907,239 @@ async function sizes() {
   await esc();
 }
 
+// ── a window nobody is looking at draws nothing, and a dropped connection costs no work
+async function recovery() {
+  // The background drifts only while someone is at the window (SOAK-1): an idle window left
+  // open all day kept the GPU drawing every frame.
+  await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  await fresh();
+  const drift = () => js(`JSON.stringify({ still: document.documentElement.hasAttribute('data-still'),
+    play: getComputedStyle(document.querySelector('.b1')).animationPlayState })`).then(JSON.parse);
+  await js(`window.dispatchEvent(new Event('focus')); true`);
+  let d = await drift();
+  check('a window in use: the background drifts', !d.still && d.play === 'running', d);
+  await js(`window.dispatchEvent(new Event('blur')); true`);
+  d = await drift();
+  check('a window that lost the focus: the background holds still', d.still && d.play === 'paused', d);
+  await js(`window.dispatchEvent(new Event('focus')); true`);
+  d = await drift();
+  check('... and drifts again once the focus is back', !d.still && d.play === 'running', d);
+  await send('Emulation.setFocusEmulationEnabled', { enabled: false });
+
+  // Requests to the API fail while `cut` is 2, as when the network changes on waking from
+  // sleep. cut === 1 fails the next check only.
+  let cut = 0, navigations = 0;
+  const hook = (m) => {
+    if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId) navigations++;
+    if (m.method !== 'Fetch.requestPaused') return;
+    const { requestId } = m.params;
+    if (cut === 2 || cut === 1 && m.params.request.url.includes('/api/check')) {
+      if (cut === 1) cut = 0;
+      send('Fetch.failRequest', { requestId, errorReason: 'ConnectionReset' });
+    } else {
+      send('Fetch.continueRequest', { requestId });
+    }
+  };
+  hooks.add(hook);
+  try {
+    await fresh();
+    await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/*' }] });
+    await paste(SLOP);
+    await done();
+    await typeMain('');
+    await paste('It is a tool. ' + SLOP);
+    await done();
+    const history = () => js(`document.getElementById('history').options.length`);
+    const had = await history();
+    const DRAFT = 'A draft the user is still writing, with a few more words to score.';
+
+    // One check fails while the server is fine: no "not running", and nothing is lost.
+    cut = 1;
+    await typeMain(DRAFT);
+    await waitFor(`/connection dropped/.test(document.getElementById('check-empty-text').textContent)`, 5000);
+    await sleep(800);
+    let s = JSON.parse(await js(`JSON.stringify({ power: document.documentElement.dataset.power, block: !document.getElementById('block').hidden,
+      note: document.getElementById('check-empty-text').textContent, main: document.getElementById('input').value })`));
+    check('one failed check with the server fine: the window is not blocked', s.power === 'on' && !s.block, s);
+    check('... the check says the connection dropped, and the draft stays', /connection dropped/.test(s.note) && s.main === DRAFT, s);
+
+    // Every request fails: the server looks stopped. Once it answers again, Check again
+    // reconnects this same window: the draft and the results stay (REC-2).
+    cut = 2;
+    await typeMain(DRAFT + ' More.');
+    check('with every request failing, the window says SlopMonster is not running',
+      await waitFor(`document.documentElement.dataset.power === 'blocked'`, 6000));
+    cut = 0;
+    navigations = 0;
+    await click('#block-action');
+    await waitFor(`document.documentElement.dataset.power === 'on'`, 6000);
+    s = JSON.parse(await js(`JSON.stringify({ power: document.documentElement.dataset.power, main: document.getElementById('input').value,
+      history: document.getElementById('history').options.length })`));
+    check('Check again with the server back: the same window carries on, draft and results kept',
+      s.power === 'on' && s.main === DRAFT + ' More.' && s.history === had && navigations === 0, { s, had, navigations });
+    writeFileSync(path.join(tmp, 'hotkey.txt'), SLOP);
+    check('... and Ctrl+Alt+U reaches it again', await waitFor(`document.getElementById('input').value.startsWith('Are you ready')`) && await done());
+
+    // The same, with nobody pressing the button: it comes back by itself.
+    cut = 2;
+    await typeMain(DRAFT);
+    await waitFor(`document.documentElement.dataset.power === 'blocked'`, 6000);
+    cut = 0;
+    navigations = 0;
+    check('after a longer drop the window reconnects by itself', await waitFor(`document.documentElement.dataset.power === 'on'`, 9000)
+      && navigations === 0 && await js(`document.getElementById('input').value`) === DRAFT, navigations);
+  } finally {
+    cut = 0;
+    await send('Fetch.disable');
+    hooks.delete(hook);
+  }
+}
+
+// ── all-day use: Enter after a hold, the reload guard, the window in front, what the page names
+async function nonstop() {
+  const pressed = (text) => writeFileSync(path.join(tmp, 'hotkey.txt'), text);
+  const callsReach = async (n, ms = 8000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) if (calls().length >= n) return true;
+    return false;
+  };
+
+  // A short text held from Ctrl+Alt+U: the focus is on Unslop, so Enter runs it.
+  await fresh();
+  let before = calls().length;
+  pressed('Fix this now please');
+  await waitFor(`/only 4 words/.test(document.getElementById('in-hint').textContent)`);
+  let f = await facts();
+  check('a short text held from Ctrl+Alt+U: the focus is on Unslop', f.focus === 'unslop' && f.view === 'idle', f);
+  await enter();
+  check('... and Enter runs it', await callsReach(before + 1), calls().length - before);
+  await waitFor(`['done', 'error'].includes(document.documentElement.dataset.run)`, 20000);
+  // A key or a password is held with the focus off Unslop, so Enter from habit sends nothing.
+  await fresh();
+  before = calls().length;
+  pressed('Here is the config for the staging box: password = hunter2hunter2 and the rest of the notes follow below.');
+  await waitFor(`/key or a password/.test(document.getElementById('in-hint').textContent)`);
+  f = await facts();
+  check('a password held from Ctrl+Alt+U: the focus is not on Unslop', f.focus === 'BODY', f);
+  await enter();
+  await sleep(1200);
+  f = await facts();
+  check('... and Enter sends nothing', calls().length === before && f.view === 'idle', { f, calls: calls().length - before });
+
+  // F5 and Ctrl+R ask first while there is something to lose (ERGO-5).
+  let navs = 0;
+  const hook = (m) => { if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId) navs++; };
+  // With the native key code too: the browser's own F5 and Ctrl+R are seen only with it.
+  const browserKey = async (k, code, vk, modifiers = 0) => {
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers });
+    await sleep(300);
+  };
+  hooks.add(hook);
+  try {
+    await fresh();
+    navs = 0;
+    await browserKey('F5', 'F5', 116);
+    check('F5 on an empty window reloads at once', await (async () => {
+      for (const end = Date.now() + 5000; Date.now() < end; await sleep(100)) if (navs) return true;
+      return false;
+    })(), navs);
+    await waitFor(`document.readyState === 'complete' && document.getElementById('engine').dataset.state !== 'checking'`);
+    await paste(SLOP);
+    await done();
+    navs = 0;
+    await browserKey('F5', 'F5', 116);
+    await sleep(500);
+    f = await facts();
+    check('F5 with a result on show: no reload, and the hint says why', navs === 0 && /Press it again to reload anyway/.test(f.hint)
+      && f.view === 'done', { navs, f });
+    await browserKey('r', 'KeyR', 82, 2);
+    check('... and Ctrl+R straight after reloads', await (async () => {
+      for (const end = Date.now() + 5000; Date.now() < end; await sleep(100)) if (navs) return true;
+      return false;
+    })(), navs);
+    await waitFor(`document.readyState === 'complete' && document.getElementById('engine').dataset.state !== 'checking'`);
+  } finally {
+    hooks.delete(hook);
+  }
+
+  // Two windows: a press goes to the one in front, not to whichever asked first (SOAK-2).
+  await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  const ctrl = new AbortController();
+  const other = [];
+  try {
+    await fresh();
+    await js(`window.dispatchEvent(new Event('focus')); true`);
+    await sleep(300);
+    const html = await (await fetch(url)).text();
+    const token = (/<meta name="slop-token" content="([^"<>]+)">/.exec(html) || [])[1];
+    (async () => {
+      while (!ctrl.signal.aborted) {
+        try {
+          const r = await fetch(url + 'api/events?page=elsewhere', { headers: { 'X-Slop-Token': token }, signal: ctrl.signal });
+          const got = await r.json();
+          if (got.events && got.events.length) other.push(...got.events);
+        } catch { return; }
+      }
+    })();
+    await sleep(300);
+    let reached = 0;
+    for (const text of ['Fix this now please', 'Fix that now please', 'Fix them now please']) {
+      pressed(text);
+      if (await waitFor(`document.getElementById('input').value === ${JSON.stringify(text)}`, 5000)) reached++;
+    }
+    check('two windows: every press goes to the window in front', reached === 3 && !other.length, { reached, other });
+  } finally {
+    ctrl.abort();
+    await send('Emulation.setFocusEmulationEnabled', { enabled: false });
+  }
+
+  // Thorough is named in the pill, as it changes what every run does.
+  await fresh({}, { 'slop-engine': 'claude', 'slop-strength': 'thorough' });
+  f = await facts();
+  check('the pill names Thorough when it is on', f.pill === 'Claude is ready \u00b7 Thorough', f.pill);
+  await fresh({}, { 'slop-engine': 'claude' });
+  f = await facts();
+  check('... and says nothing of it when it is off', f.pill === 'Claude is ready', f.pill);
+
+  // A sentence pattern's chip shows the words it matched, with the rule on hover.
+  await typeMain(SLOP);
+  check('a chip shows the matched words, and the rule on hover', await waitFor(`[...document.querySelectorAll('#cats .hit[title]')]
+    .some((c) => /^"[^"]*not just a calendar[^"]*"/i.test(c.querySelector('.hit-label').textContent) && c.title.length > 0)`),
+  await js(`[...document.querySelectorAll('#cats .hit')].map((c) => [c.textContent, c.title]).slice(0, 6)`));
+
+  // The list of results names the AI and the score of each.
+  await typeMain('');
+  await paste(SLOP);
+  await done();
+  await typeMain('');
+  await paste('It is a tool. ' + SLOP);
+  await done();
+  const labels = await js(`[...document.getElementById('history').options].map((o) => o.textContent)`);
+  check('the list of results names the AI and the score', labels.length === 2 && labels.every((l) => / · Claude [0-5]\/5 · /.test(l)), labels);
+
+  // A plan that has run out: one click runs the same text with the other AI, this once.
+  await fresh({ fail: 'usage_limit' }, { 'slop-engine': 'claude' });
+  await paste(SLOP);
+  await waitFor(`document.documentElement.dataset.run === 'error'`, 15000);
+  const button = await js(`(() => { const b = document.getElementById('err-other'); return { hidden: b.hidden, text: b.textContent } })()`);
+  check('a usage limit offers the other AI', !button.hidden && button.text === 'Try with ChatGPT', button);
+  control();
+  before = calls().length;
+  await click('#err-other');
+  check('... which runs the text with it', await done() && calls().slice(before).every((c) => c.engine === 'chatgpt')
+    && calls().length > before, calls().slice(before));
+  f = await facts();
+  check('... and leaves Claude chosen in Settings', f.engine === 'claude' && f.stored === 'claude', f);
+  await fresh({ fail: 'cancelled' }, { 'slop-engine': 'claude' });
+  await paste(SLOP);
+  await waitFor(`document.documentElement.dataset.run === 'error'`, 15000);
+  check('a stopped run does not offer it', await js(`document.getElementById('err-other').hidden`));
+  control();
+}
+
 // Flows named on the command line run alone, as in: python app/test_page.py looks
 const only = process.argv.slice(6);
-for (const flow of [holds, firstEngine, settingsPanel, results, undoLimits, saveWord, focusAndTitles, copiedNote, longTexts, looks, edges, welcome, sizes]) {
+for (const flow of [holds, firstEngine, settingsPanel, results, undoLimits, undoMemory, saveWord, focusAndTitles, copiedNote, listsOfThree, lessSure, contextShown, otherEngine, longTexts, looks, edges, welcome, sizes, recovery, nonstop]) {
   if (only.length && !only.includes(flow.name)) continue;
   try {
     await flow();

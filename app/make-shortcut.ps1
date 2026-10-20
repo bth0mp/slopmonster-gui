@@ -1,5 +1,8 @@
 # Creates the SlopMonster shortcuts (Desktop + Start Menu). Re-run after moving this folder.
 #   powershell -ExecutionPolicy Bypass -File app\make-shortcut.ps1
+# With -Startup, the same shortcut also goes in the Startup folder, so SlopMonster starts when
+# you sign in to Windows and Ctrl+Alt+U works after a restart.
+param([switch]$Startup)
 $ErrorActionPreference = 'Stop'
 
 # pythonw, not python: no console window sits behind the app.
@@ -17,6 +20,7 @@ if ($LASTEXITCODE) { throw "SlopMonster needs Python 3.9 or newer, and $pythonw 
 
 $shellApp = New-Object -ComObject Shell.Application
 $folders = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))
+if ($Startup) { $folders += [Environment]::GetFolderPath('Startup') }
 foreach ($folder in $folders) {
     # Not WScript.Shell: it passes paths through the ANSI code page, so a letter outside it, in
     # this folder's path or the Desktop's, arrives as '?'. Write an empty shell link (the 76-byte

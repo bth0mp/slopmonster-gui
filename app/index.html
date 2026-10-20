@@ -283,6 +283,9 @@ html[data-run="working"] .b-run { opacity: 1; animation: breathe 7s ease-in-out 
 html[data-run="done"][data-result="clean"] .b-run { --run: var(--mint); opacity: 1; }
 html:not([data-power="on"]) .bloom { opacity: .35; animation-play-state: paused; }
 html:not([data-power="on"]) .b-run { opacity: 0; }
+/* With nobody at the window (it lost the focus, or a minute passed with no input) the drift
+   holds where it is, so a window left open all day draws no frames. A run still moves it. */
+html[data-still]:not([data-run="working"]) .bloom { animation-play-state: paused; }
 
 .grain {
   position: absolute; inset: 0;
@@ -541,6 +544,7 @@ html[data-theme="light"] .when-dark { display: none; }
 }
 .context input:hover { background: var(--chrome); }
 .context input:focus-visible { background: var(--chrome); box-shadow: inset 0 0 0 1.5px var(--well-focus); }
+.context .context-clear { flex: none; width: 28px; height: 28px; padding: 0; font-size: 17px; font-weight: 400; }
 
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex: none; }
 .actions .btn-primary { margin-left: auto; }
@@ -1144,6 +1148,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
       <div class="context">
         <label for="context">Where it will appear</label>
         <input type="text" id="context" dir="auto" maxlength="300" autocomplete="off" spellcheck="false" placeholder="Optional. For example: homepage for a roofing company">
+        <button type="button" class="btn btn-ghost context-clear" id="context-clear" aria-label="Clear Where it will appear" title="Clear Where it will appear" hidden>&times;</button>
       </div>
     </div>
 
@@ -1200,7 +1205,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
         <span class="switch-track" aria-hidden="true"></span>
         <span class="switch-text">Copy when it passes</span>
       </label>
-      <label class="switch" id="hotkey-wrap" title="Copy text in any program, then press Ctrl+Alt+U. The rewrite is copied back when it passes, and a notification says so.">
+      <label class="switch" id="hotkey-wrap" title="Copy text in any program, then press Ctrl+Alt+U. The rewrite is copied back when it passes, and a notification says so. Minimise this window to keep Ctrl+Alt+U working. Closing it turns SlopMonster off.">
         <input type="checkbox" role="switch" id="hotkey" checked>
         <span class="switch-track" aria-hidden="true"></span>
         <span class="switch-text" id="hotkey-text">Ctrl+Alt+U unslops what you copied</span>
@@ -1258,6 +1263,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
           <p class="view-detail" id="err-detail" hidden></p>
           <div class="view-actions">
             <button type="button" class="btn btn-primary" id="err-action">Try again</button>
+            <button type="button" class="btn" id="err-other" hidden title="Rewrite the same text once with the other AI. Settings stay as they are.">Try with Claude</button>
             <button type="button" class="btn" id="err-settings" hidden>Open settings</button>
             <button type="button" class="btn" id="err-back" hidden>Back to the last result</button>
           </div>
@@ -1299,6 +1305,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
           <p class="outcome-title" id="outcome-title"></p>
           <p class="outcome-meta" id="outcome-meta"></p>
           <button type="button" class="btn outcome-act" id="anyway" hidden>Unslop anyway</button>
+          <button type="button" class="btn outcome-act" id="other" hidden title="Rewrite the same text once with the other AI. Settings stay as they are.">Try with Claude</button>
         </div>
         <div class="seg view-seg" id="view-seg" role="radiogroup" aria-label="Show" hidden>
           <div class="seg-track">
@@ -1326,10 +1333,20 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
           <p>The rewrite should carry every number, link and address over as you wrote it. These differ.</p>
           <ul class="hits" id="carried-hits"></ul>
         </section>
+        <section class="callout is-caution" id="hedged" hidden>
+          <h3><svg class="i" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="#i-caution"/></svg>Less sure than your text</h3>
+          <p>The rewrite added a caveat your text did not have to these sentences. If you meant what you wrote, put the paragraph back with Keep original in Changes, or edit the sentence.</p>
+          <ul class="hits" id="hedged-hits"></ul>
+        </section>
         <section class="callout is-caution" id="verify" hidden>
           <h3><svg class="i" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="#i-caution"/></svg>Verify these claims</h3>
           <p>The checker cannot tell whether a number is true. Check each of these before you publish.</p>
           <ul class="hits" id="verify-hits"></ul>
+        </section>
+        <section class="callout is-caution" id="lists" hidden>
+          <h3><svg class="i" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="#i-caution"/></svg>Lists of three</h3>
+          <p>These do not stop Copy. Vary one if it reads as a formula, and leave a real list as it is.</p>
+          <ul class="hits" id="lists-hits"></ul>
         </section>
         <section class="callout is-caution" id="fill" hidden>
           <h3><svg class="i" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="#i-caution"/></svg>Fill these in before sending</h3>
@@ -1467,7 +1484,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   const root = doc.documentElement;
   const $ = (id) => doc.getElementById(id);
 
-  const TOKEN = (doc.querySelector('meta[name="slop-token"]') || {}).content || '';
+  // A copy started again has a new token, which reconnect() takes from its page.
+  let TOKEN = (doc.querySelector('meta[name="slop-token"]') || {}).content || '';
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const CHAR_LIMIT = 200000;   // the server refuses longer text with 413 too_long
   const BODY_LIMIT = 1000000;  // bytes; past this the server stops reading the request
@@ -1479,6 +1497,11 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   // a thousand lines take it about a second. Four hundred took 140 to 175 ms in testing.
   const UNDO_CHARS = 100000;
   const UNDO_LINES = 400;
+  // The browser keeps each replaced text in its undo history, which no garbage collection
+  // frees, so a window open for days grew without end. The history is emptied before a swap
+  // once UNDO_KEEP swaps are in it, or when the text being replaced is over UNDO_BIG.
+  const UNDO_KEEP = 20;
+  const UNDO_BIG = 20000;
   const HISTORY_SIZE = 10;     // results of this session kept for the list above the result
   const FILES_HELD = 3;        // Word files whose bytes stay in memory for saving into
   const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -1522,6 +1545,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   const hotkeyText = $('hotkey-text');
   const input = $('input');
   const contextInput = $('context');
+  const contextClear = $('context-clear');
   const pasteBtn = $('paste');
   const openBtn = $('open');
   const fileInput = $('file');
@@ -1563,6 +1587,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   const errDetail = $('err-detail');
   const errAction = $('err-action');
   const errSettings = $('err-settings');
+  const errOther = $('err-other');
   const errBack = $('err-back');
   const sWelcome = $('s-welcome');
   const welcomeTitle = $('welcome-title');
@@ -1575,6 +1600,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   const outcomeTitle = $('outcome-title');
   const outcomeMeta = $('outcome-meta');
   const anywayBtn = $('anyway');
+  const otherBtn = $('other');
   const viewSeg = $('view-seg');
   const viewChanges = $('view-changes');
   const viewRadios = Array.from(viewSeg.querySelectorAll('input[name="view"]'));
@@ -1587,10 +1613,14 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   const leftSay = $('left-say');
   const verifyBox = $('verify');
   const verifyHits = $('verify-hits');
+  const listsBox = $('lists');
+  const listsHits = $('lists-hits');
   const fillBox = $('fill');
   const fillList = $('fill-hits');
   const carriedBox = $('carried');
   const carriedHits = $('carried-hits');
+  const hedgedBox = $('hedged');
+  const hedgedHits = $('hedged-hits');
   const notesBox = $('notes');
   const notesList = $('notes-list');
 
@@ -1637,6 +1667,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     errorKind: null,    // engine | run | input
     errorCode: null,
     errorAction: 'retry',
+    failed: null,       // { draft, source, context, strength, engine } of the run the error is about
     blockKind: null,
     source: null,       // { name, kind, bytes, handle } of the file the text came from, if any
   };
@@ -1770,6 +1801,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
         advisory,
         // Slots such as [Your Name], for the author to fill in. Listed, never scored.
         fill: key === 'placeholders',
+        // Lists of three cost a point but never stop a pass: the author decides whether to vary one.
+        optional: advisory && key === 'rhythm',
         hits,
         kind: hits.length === 0 ? 'pass' : (advisory ? 'caution' : 'flag'),
       };
@@ -1789,7 +1822,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     for (let n = 0; n < 5; n += 1) {
       const cat = cats[n];
       const pip = el('i', cat ? 'is-' + cat.kind : '');
-      if (cat) pip.title = cat.title + ': ' + KIND_WORD[cat.kind];
+      if (cat) pip.title = cat.title + ': ' + (cat.optional ? 'optional' : KIND_WORD[cat.kind]);
       wrap.appendChild(pip);
     }
     return wrap;
@@ -1798,12 +1831,13 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   function tally(check) {
     const cats = categoriesOf(check);
     const flagged = cats.filter((cat) => cat.kind === 'flag');
-    const verify = cats.filter((cat) => cat.kind === 'caution' && !cat.fill);
+    const verify = cats.filter((cat) => cat.kind === 'caution' && !cat.fill && !cat.optional);
     return {
       cats,
       flagged,
       verify,
       fill: cats.filter((cat) => cat.fill && cat.hits.length),
+      lists: cats.filter((cat) => cat.optional && cat.hits.length),
       claims: verify.reduce((sum, cat) => sum + cat.hits.length, 0),
       clean: check && typeof check.clean === 'boolean' ? check.clean : flagged.length === 0,
     };
@@ -1819,7 +1853,11 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
 
   function hitChip(hit) {
     const chip = el('li', 'hit');
-    chip.appendChild(el('span', 'hit-label', hit && hit.label !== undefined ? hit.label : ''));
+    const label = hit && hit.label !== undefined ? String(hit.label) : '';
+    const match = hit && typeof hit.match === 'string' ? hit.match.trim() : '';
+    // A sentence pattern shows the words of yours that it matched, and the rule on hover.
+    chip.appendChild(el('span', 'hit-label', match || label));
+    if (match && label) chip.title = label;
     if (hit && hit.detail) chip.appendChild(el('span', 'hit-detail', hit.detail));
     return chip;
   }
@@ -1829,7 +1867,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     const head = el('div', 'cat-head');
     let stateText = 'Passing';
     if (cat.kind === 'flag') stateText = plural(cat.hits.length, 'hit');
-    if (cat.kind === 'caution') stateText = cat.hits.length + (cat.fill ? ' to fill in' : ' to verify');
+    if (cat.kind === 'caution') stateText = cat.hits.length + (cat.fill ? ' to fill in' : cat.optional ? ' optional' : ' to verify');
     head.append(icon(KIND_ICON[cat.kind], 'cat-icon'), el('span', 'cat-title', cat.title), el('span', 'cat-state', stateText));
     row.appendChild(head);
     if (cat.hits.length) {
@@ -1840,7 +1878,9 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     if (cat.kind === 'caution') {
       row.appendChild(el('p', 'cat-note', cat.fill
         ? 'This does not count as a failure. Replace each one before you send the text.'
-        : 'This does not count as a failure. Only you can confirm these numbers are true.'));
+        : cat.optional
+          ? 'This does not count as a failure. A list of three can read as a formula. Vary it if it does, and leave a real list as it is.'
+          : 'This does not count as a failure. Only you can confirm these numbers are true.'));
     }
     return row;
   }
@@ -1888,7 +1928,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   /* ---------- talking to the server ---------- */
 
   class OfflineError extends Error {
-    constructor() { super('SlopMonster is not running.'); this.name = 'OfflineError'; }
+    constructor() { super('The connection dropped for a moment. Try again.'); this.name = 'OfflineError'; }
   }
 
   class ApiError extends Error {
@@ -1949,8 +1989,11 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
 
   // One place decides what a failed call means. Returns true when it took
   // over the whole window, so the caller has nothing left to show.
+  // A request that fails outright is not enough to say SlopMonster stopped: the browser drops
+  // open requests when the network changes, as on waking from sleep, while the server is fine.
+  // The caller shows its own error, and the block replaces it only if a ping fails too.
   function tookOver(err) {
-    if (err instanceof OfflineError) { showBlock('offline'); return true; }
+    if (err instanceof OfflineError) { ping().then((alive) => { if (!alive) showBlock('offline'); }); return false; }
     if (err instanceof ApiError && err.status === 403) { showBlock('stale'); return true; }
     return false;
   }
@@ -2021,7 +2064,10 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     const options = state.history.map((entry, index) => {
       // Two runs of one file or text in the same minute, as Run again gives, differ by the second.
       const twin = labels.some((label, i) => i !== index && label === labels[index] && clock(state.history[i].at) === clock(entry.at));
-      const option = el('option', '', clock(entry.at, twin) + ' \u00b7 ' + labels[index]);
+      // The score of the text listed: with a paragraph kept, only once that text is checked.
+      const after = !keptCount(entry) ? entry.ev.after : entry.checked === entry.text ? entry.after : null;
+      const how = ((NAMES[entry.engine] || '') + (hasScore(after) ? ' ' + after.score + '/5' : '')).trim();
+      const option = el('option', '', clock(entry.at, twin) + ' \u00b7 ' + (how ? how + ' \u00b7 ' : '') + labels[index]);
       option.value = String(index);
       return option;
     });
@@ -2047,7 +2093,28 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     if (!autoSwitch.checked) idleNote.textContent = 'The automatic switch is off, so nothing runs until you press Unslop.';
     else if (alwaysSwitch.checked || prefs.strength === 'thorough') idleNote.textContent = 'The automatic switch is on, so pasting or opening a file starts a run by itself. Text that already passes is rewritten too, so each paste costs a ' + NAMES[chosen()] + ' call.';
     else idleNote.textContent = 'The automatic switch is on, so pasting or opening a file starts a run by itself. Text that already passes is left as it is.';
+    // Where it will appear is never stored, but it goes with every run until it is cleared.
+    const context = contextInput.value.trim();
+    if (context) idleNote.textContent += ' Runs are written for "' + context + '", Ctrl+Alt+U runs included.';
   }
+
+  // The field's own Clear button shows only when there is something to clear.
+  function paintContext() {
+    contextClear.hidden = !contextInput.value;
+    paintIdleNote();
+    if (state.view === 'error') paintOther();
+  }
+
+  // "Written for" in the window, cut to 80 characters so that a long one leaves the result its
+  // room, and the start of a notification, cut to 40. The window's full text is in a tooltip.
+  const cutTo = (text, most) => {
+    const chars = Array.from(text || '');
+    return chars.length > most ? chars.slice(0, most).join('').trimEnd() + '\u2026' : chars.join('');
+  };
+  const CONTEXT_SHOWN = 80;
+  const writtenFor = (context) => (context ? ' Written for: "' + cutTo(context, CONTEXT_SHOWN) + '".' : '');
+  const writtenForTip = (context) => (Array.from(context || '').length > CONTEXT_SHOWN ? 'Written for: ' + context : '');
+  const forLead = (context) => (context ? 'For "' + cutTo(context, 40) + '". ' : '');
 
   // showIdle(READY) titles the view with the chosen AI, and the title follows a switch of AI.
   const READY = {};
@@ -2088,6 +2155,11 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
         claude: 'The rewrite did not finish in time, so your text was not changed. Try again, or choose the Fast model in Settings for long text.',
         chatgpt: 'The rewrite did not finish in time, so your text was not changed. Try again, or choose a lower reasoning effort in Settings.',
       },
+    },
+    offline: {
+      kind: 'run', action: 'retry',
+      title: '{AI} could not be reached',
+      body: 'SlopMonster could not reach {AI}. Check the internet connection, then try again.',
     },
     engine_failed: {
       kind: 'run', action: 'retry',
@@ -2155,6 +2227,11 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   const ACTION_LABEL = { check: 'Check again', retry: 'Try again', edit: 'Go to the text', login: 'Sign in to {AI}', settings: 'Open settings' };
   const LOGIN_COMMAND = { claude: 'claude auth login', chatgpt: 'codex login' };
   const chosen = () => prefs.engine || 'claude';
+  // Try with the other AI: one run with it, and the choice in Settings stays as it is.
+  const otherOf = (engine) => (engine === 'chatgpt' ? 'claude' : 'chatgpt');
+  const otherReady = (engine) => !!(state.engines[otherOf(engine)] && state.engines[otherOf(engine)].ok);
+  // The errors another AI might get past. Not a cancelled run, nor a text neither could take.
+  const OTHER_CODES = ['usage_limit', 'not_logged_in', 'missing', 'timeout', 'engine_failed', 'engine_changed', 'cli_old', 'empty_output'];
   // An error's text for one engine: its own version when it has one, with {AI} named.
   const forEngine = (value, engine) => String(value && typeof value === 'object' ? value[engine] : value || '').replace(/\{AI\}/g, NAMES[engine]);
 
@@ -2186,6 +2263,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     errBack.hidden = !state.shown;
     const welcomed = root.dataset.welcome === 'on';
     setView('error');
+    paintOther();
     if (root.dataset.welcome === 'on') {
       setTitle(welcomeTitle.textContent);
       if (!welcomed) say(welcomeTitle.textContent + '.');
@@ -2205,8 +2283,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
 
   // What a run sends for the chosen engine: { engine, model, effort } or { error } when the
   // custom name typed in Settings is not one the server would take.
-  function runChoice() {
-    const engine = chosen();
+  function runChoice(engine = chosen()) {
     if (engine === 'chatgpt') {
       const model = prefs.gptModel === 'custom' ? prefs.gptCustom : '';
       if (model && !CODEX_ID.test(model)) return { engine, error: 'The custom ChatGPT model name "' + model + '" is not one SlopMonster can send. Fix it in Settings, or choose Plan default.' };
@@ -2230,7 +2307,10 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     if (!engine) { paintEngine('checking', 'Checking', ''); return; }
     const pick = runChoice();
     const tip = pick.error ? '' : 'Rewrites with ' + ranWith(pick.engine, pick.model) + '. Change it in Settings.';
-    if (engine.ok) paintEngine('ready', name + ' is ready', tip);
+    // Thorough is named here, as it changes every run: each is rewritten whole and never copied for you.
+    const thorough = prefs.strength === 'thorough';
+    if (engine.ok) paintEngine('ready', name + ' is ready' + (thorough ? ' \u00b7 Thorough' : ''),
+      tip + (tip && thorough ? ' Thorough is on, so a result is never copied for you.' : ''));
     else if (engine.code === 'not_logged_in') paintEngine('not_logged_in', name + ' not signed in', engine.message);
     else if (engine.code === 'missing') paintEngine('missing', (chosen() === 'chatgpt' ? 'Codex' : 'Claude') + ' CLI missing', engine.message);
     else paintEngine('down', name + ' unavailable', engine.message);
@@ -2280,6 +2360,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
       }
     }
     paintWelcome();
+    paintOther();
     return engine;
   }
 
@@ -2561,6 +2642,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     if (!limitHintShown) hint('');
     paintInput();
     scheduleCheck(delay);
+    if (state.view === 'error') paintOther();
   }
 
   /* ---------- a run ---------- */
@@ -2613,7 +2695,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
 
   function showWorking(run) {
     workTitle.textContent = 'Checking your text';
-    workNote.textContent = 'Most runs take 5 to 60 seconds.';
+    workNote.textContent = 'Most runs take 5 to 60 seconds.' + writtenFor(run.context);
+    workNote.title = writtenForTip(run.context);
     const first = ledgerRow('Your text');
     setRow(first, 'active', 'Checking');
     ledger.replaceChildren(first);
@@ -2644,7 +2727,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     Array.from(ledger.children).forEach((row, index) => { if (index > 0) setRow(row, 'waiting', 'Waiting'); });
     workTitle.textContent = 'Part ' + part + ' of ' + run.parts;
     setTitle(workTitle.textContent);
-    workNote.textContent = 'A long text takes a few minutes. ' + (run.strength === 'thorough' ? 'Thorough rewrites every part.' : 'Parts with nothing flagged are skipped.');
+    workNote.textContent = 'A long text takes a few minutes. ' + (run.strength === 'thorough' ? 'Thorough rewrites every part.' : 'Parts with nothing flagged are skipped.') + writtenFor(run.context);
+    workNote.title = writtenForTip(run.context);
     if (part === 1 || part % 5 === 0) say('Part ' + part + ' of ' + run.parts + '.');
   }
 
@@ -2694,7 +2778,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   const savesInPlace = (source) => !!source && source.kind === 'docx' && !!source.bytes;
 
   function paintExtras() {
-    extras.hidden = leftBox.hidden && carriedBox.hidden && verifyBox.hidden && fillBox.hidden && notesBox.hidden;
+    extras.hidden = leftBox.hidden && carriedBox.hidden && hedgedBox.hidden && verifyBox.hidden && listsBox.hidden && fillBox.hidden && notesBox.hidden;
   }
 
   // The notes from the run, then what saving it reported.
@@ -2852,6 +2936,13 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
       const words = wordsKept(entry, ch);
       meta += words.share === 100 && words.changed > 0 ? ' Kept over 99% of your words.' : ' Kept ' + words.share + '% of your words.';
     }
+    // A chat answer's bold labels the rewrite kept. Copy writes plain text, so they paste as **Cost:**.
+    // With paragraphs kept as written, the count is from the check of the text as it now stands.
+    const rechecked = kept && entry.after && typeof entry.after.labels_left === 'number';
+    const labelsLeft = rechecked ? toInt(entry.after.labels_left) : toInt(ev.labels_left);
+    if (labelsLeft && !(entry.source && entry.source.kind === 'docx')) {
+      meta += ' ' + plural(labelsLeft, 'bold label is', 'bold labels are') + ' still in the text. Where Markdown is not shown, such as a plain email, they paste with their asterisks.';
+    }
     if (t.clean && t.claims) meta += ' ' + plural(t.claims, 'claim') + ' left for you to verify.';
 
     // The server compares every number, link and address in the two texts.
@@ -2863,6 +2954,10 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
       ...lost.map((item) => hitChip({ label: item, detail: 'missing from the rewrite' })),
       ...added.map((item) => hitChip({ label: item, detail: 'not in your text' })));
     carriedBox.hidden = lost.length + added.length === 0;
+    // A sentence the rewrite made less sure than yours: advice, which stops nothing.
+    const hedged = (Array.isArray(warn.hedged) ? warn.hedged : []).filter(Array.isArray);
+    hedgedHits.replaceChildren(...hedged.map((h) => hitChip({ label: String(h[0]), detail: String(h[1] || '') })));
+    hedgedBox.hidden = !hedged.length;
     // An option label, a second version or a tip: deleted with the chat reply, as asked.
     const framing = (Array.isArray(warn.framing) ? warn.framing : []).map(String);
     const checked = toInt(warn.checked);
@@ -2874,8 +2969,10 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
         : ' All ' + checked + ' numbers and links in your text carried over.';
     }
     if (onClipboard === entry && kept) meta += ' The clipboard still holds the full rewrite. Press Copy for this version.';
+    meta += writtenFor(entry.context);
     outcomeTitle.textContent = title;
     outcomeMeta.textContent = meta;
+    outcomeMeta.title = writtenForTip(entry.context);
 
     fillHits(leftHits, t.flagged, true);
     leftBox.hidden = t.clean || t.flagged.length === 0;
@@ -2887,6 +2984,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
       : 'Edit them by hand, or run the result again.');
     fillHits(verifyHits, t.verify, false);
     verifyBox.hidden = t.claims === 0;
+    fillHits(listsHits, t.lists, false);
+    listsBox.hidden = !t.lists.length;
     fillHits(fillList, t.fill, false);
     fillBox.hidden = t.fill.length === 0;
     paintExtras();
@@ -2894,7 +2993,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     else outcome.removeAttribute('aria-busy');
     outcome.classList.toggle('is-stale', stale);
     root.dataset.result = t.clean ? 'clean' : 'flagged';
-    return { title, differs: lost.length + added.length };
+    paintOther();
+    return { title, differs: lost.length + added.length, hedged: hedged.length };
   }
 
   // A paragraph put back as it was written, or the rewrite's taken again. The text that Copy,
@@ -2931,6 +3031,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   }
 
   const SAVE_WAITS = 'Save as Word works when a result is on show.';
+  const RELOAD_WARN = "F5 and Ctrl+R reload the window, which clears the box and this session's results. Press it again to reload anyway.";
+  let reloadAskedAt = 0;
   const RECHECK_FAILED = 'The score could not be updated for the paragraphs you kept. ';
 
   // A run of clicks is checked once, 300 ms after the last.
@@ -2971,6 +3073,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     entry.checked = text;
     if (reply.warnings && typeof reply.warnings === 'object') entry.warnings = reply.warnings;
     if (state.shown === entry && state.view === 'done') say(paintVerdict(entry).title);
+    if (state.history.includes(entry)) paintHistory();
   }
 
   // Paints one result in the done view: a run that has just finished (`fresh`), or an earlier
@@ -3028,13 +3131,15 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     run.over = true;
     const text = typeof ev.text === 'string' ? ev.text : '';
     if (!text.trim()) {
-      showError('empty_output', '');
+      state.failed = failedOf(run);
+      showError('empty_output', '', run.engine);
       return;
     }
     const entry = {
       at: Date.now(),
       draft: run.text,
       context: run.context,
+      strength: run.strength,
       engine: NAMES[ev.engine] ? ev.engine : run.engine,
       model: typeof ev.model === 'string' && ev.model ? ev.model : run.model,
       ms: toInt(ev.ms) || Math.round(performance.now() - run.startedAt),
@@ -3069,11 +3174,12 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     // How it ended, for the taskbar. A number or link that differs needs reading first.
     const score = hasScore(after) ? ' ' + after.score + '/5' : '';
     setTitle(painted.differs ? 'Check before copying' : (tally(after).clean ? 'Passes' : 'Still flagged') + score);
-    if (copied) tellCopied(before, after, run.hotkey ? 'The unslopped text is on the clipboard' : '');
+    const lead = run.hotkey ? forLead(run.context) : '';
+    if (copied) tellCopied(before, after, run.hotkey ? 'The unslopped text is on the clipboard' : '', painted.hedged, lead);
     else if (run.hotkey) {
-      notify('The rewrite needs a look', painted.differs
+      notify('The rewrite needs a look', lead + (painted.differs
         ? plural(painted.differs, 'number or link differs', 'numbers or links differ') + ' from what you copied. Check before you use it.'
-        : tally(after).clean ? (run.strength === 'thorough' ? 'It passes. A Thorough rewrite is never copied for you, so open SlopMonster and read it first.' : 'It passes, but it was not copied. Open SlopMonster to copy it.') : 'It is still flagged. Open SlopMonster to see what is left.');
+        : tally(after).clean ? (run.strength === 'thorough' ? 'It passes. A Thorough rewrite is never copied for you, so open SlopMonster and read it first.' : 'It passes, but it was not copied. Open SlopMonster to copy it.') : 'It is still flagged. Open SlopMonster to see what is left.'));
     }
 
     say(painted.title + ' Score went from ' + (hasScore(before) ? before.score : 'no score') + ' to ' + (hasScore(after) ? after.score : 'no score') + ' of 5.'
@@ -3103,10 +3209,15 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     paintSettings();
   }
 
+  // What Try with the other AI needs to run a failed run's text again. `redo` marks a run that
+  // was itself a Try with the other AI, which Try again repeats with that AI.
+  const failedOf = (run) => ({ draft: run.text, source: run.source, context: run.context, strength: run.strength, engine: run.engine, redo: run.redo });
+
   function failRun(run, code, message) {
     stopTimer();
     run.over = true;
     engineLost(run.engine, code, message);
+    state.failed = failedOf(run);
     showError(code || 'fallback', message || '', run.engine);
     if (run.hotkey) notify('The rewrite did not finish', errTitle.textContent);
     // Cancel, which often had the focus, has just been hidden, and the browser drops the
@@ -3203,9 +3314,11 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     /\bpass(?:word|code|phrase)\s+(?:is|was)\s+(?=\S*\d)\S{6,}/i,
   ];
 
+  const looksSecret = (text) => SECRET_SHAPES.some((shape) => shape.test(text));
+
   function holdReason(text) {
     if (tooLong(text)) return lengthNote(text) + ' Split the text and unslop one part at a time.';
-    if (SECRET_SHAPES.some((shape) => shape.test(text))) {
+    if (looksSecret(text)) {
       return 'This looks like it holds a key or a password, so it was not sent. Press Unslop if you do want it rewritten.';
     }
     // The size above which the server rewrites in parts.
@@ -3239,7 +3352,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
 
   // `auto` is true only from autoRun. The button's click passes an event, which is not.
   // `hotkey` marks a run that Ctrl+Alt+U started: its result is copied back when it passes.
-  async function startRun(auto, composing, hotkey) {
+  // `redo` is { engine, strength } for Try with the other AI: one run, never copied for you.
+  async function startRun(auto, composing, hotkey, redo) {
     if (state.power !== 'on') return;
     const text = input.value;
     if (!hasWords(text)) {
@@ -3260,6 +3374,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     }
 
     abortRun(); // a new run replaces the one in flight
+    state.failed = null;
     if (tooLong(text)) {
       showError('too_long', lengthNote(text) + ' Split the text and unslop one part at a time.');
       return;
@@ -3267,7 +3382,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     // A fresh profile picks its engine from the first status. Wait for it, once.
     if (!prefs.engine) await refreshStatus();
     if (state.power !== 'on') return;
-    const pick = runChoice();
+    const pick = runChoice(redo ? redo.engine : chosen());
     runCounter += 1;
     const run = {
       id: runCounter,
@@ -3283,9 +3398,10 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
       latest: null,
       composing: composing === true,
       hotkey: hotkey === true,
-      strength: prefs.strength,
+      redo: !!redo,
+      strength: redo ? redo.strength : prefs.strength,
       source: state.source,
-      context: '',
+      context: contextInput.value.trim(),
     };
     state.run = run;
     state.dirty = false;
@@ -3293,7 +3409,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
 
     if (pick.error) { failRun(run, 'bad_model', pick.error); return; }
     // If the engine was not ready a moment ago, ask again before spending a run.
-    if (state.engine && !state.engine.ok) {
+    const was = state.engines[run.engine];
+    if (was && !was.ok) {
       const engine = await refreshStatus();
       if (state.run !== run || run.over || state.power !== 'on') return;
       // Settings can switch the engine while a status is read. The run goes to the one it started with.
@@ -3305,12 +3422,10 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     if (run.effort) body.effort = run.effort;
     if (auto === true) body.auto = true;
     if (auto === true && alwaysSwitch.checked) body.always = true;
-    if (copySwitch.checked || run.hotkey) body.copy = true;
+    if (!run.redo && (copySwitch.checked || run.hotkey)) body.copy = true;
     // Text from a Word file goes back into that file, so its paragraphs must stay as they are.
     if (run.source && run.source.kind === 'docx') body.structure = true;
-    const context = contextInput.value.trim();
-    if (context) body.context = context;
-    run.context = context;
+    if (run.context) body.context = run.context;
 
     let res = null;
     try {
@@ -3345,6 +3460,34 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     if (!run.over && state.run === run) await endedEarly(run);
   }
 
+  // Try with Claude or ChatGPT, under a result or on an error: the same draft, Word file,
+  // Where it will appear and strength, sent once to the other AI. prefs.engine stays.
+  function paintOther() {
+    const shown = state.shown;     // each button sits in its own view, hidden with it
+    otherBtn.hidden = !(shown && toInt(shown.ev.rounds) > 0 && otherReady(shown.engine));
+    if (shown) otherBtn.textContent = 'Try with ' + NAMES[otherOf(shown.engine)];
+    // On the error, only while the box and Where it will appear still hold what failed: Try again
+    // beside it runs what they hold now, and the two buttons must not run different texts.
+    const failed = state.failed;
+    errOther.hidden = !(failed && OTHER_CODES.includes(state.errorCode) && failed.engine === state.errorEngine
+      && root.dataset.welcome !== 'on' && otherReady(failed.engine)
+      && input.value === failed.draft && contextInput.value.trim() === (failed.context || ''));
+    if (failed) errOther.textContent = 'Try with ' + NAMES[otherOf(failed.engine)];
+  }
+
+  function tryOther(from) {
+    if (!from || state.power !== 'on' || !otherReady(from.engine) || state.view === 'working') return;
+    hint('');
+    limitHintShown = false;
+    if (input.value !== from.draft) setInputText(from.draft, from.source);
+    else state.source = from.source;
+    contextInput.value = from.context || '';
+    paintContext();
+    textChanged(0);
+    startRun(false, false, false, { engine: otherOf(from.engine), strength: from.strength || prefs.strength });
+    if (state.view === 'working') cancelBtn.focus();
+  }
+
   function cancelRun() {
     if (state.view !== 'working') return;
     abortRun();
@@ -3371,7 +3514,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   }
 
   // The result was copied while the user is in another window: say so where they can see it.
-  function tellCopied(before, after, title) {
+  function tellCopied(before, after, title, hedged, lead) {
     if (doc.hasFocus()) return;
     // A slot such as [Your Name] is still in the text, and the list of them is in this window only.
     const slots = [...new Set([].concat(...tally(after).fill.map((cat) => cat.hits.map((hit) => String(hit && hit.label)))))];
@@ -3379,7 +3522,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     const scores = hasScore(before) && hasScore(after) ? 'Score ' + before.score + ' to ' + after.score + ' of 5. ' : '';
     const named = slots.slice(0, 3).join(', ') + (slots.length > 3 ? ' and ' + (slots.length - 3) + ' more' : '');
     notify(title || 'SlopMonster copied the rewrite',
-      scores + (slots.length ? 'Fill in ' + named + ' before you send it.' : 'Paste it where you need it.'));
+      (lead || '') + scores + (slots.length ? 'Fill in ' + named + ' before you send it.' : 'Paste it where you need it.')
+      + (hedged > 0 ? ' ' + plural(hedged, 'sentence is', 'sentences are') + ' less sure than yours.' : ''));
   }
 
   function resetCopy() {
@@ -3460,6 +3604,18 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     if (swaps.size > 20) swaps.delete(swaps.keys().next().value);
   }
 
+  // The browser drops the undo steps of a box taken out of the page, and setting its value
+  // does not, so the box is taken out and put straight back in the same place.
+  let undoSwaps = 0;  // swaps in the undo history since it was last emptied
+  function forgetUndo() {
+    const focused = doc.activeElement === input;
+    const parent = input.parentNode, next = input.nextSibling;
+    parent.removeChild(input);
+    parent.insertBefore(input, next);
+    if (focused) input.focus({ preventScroll: true });
+    undoSwaps = 0;
+  }
+
   // Every replacement of the whole text comes through here. It goes in as an edit, so that
   // Ctrl+Z brings back what it replaced, and the 'input' listener puts the file back with it.
   function setInputText(text, source) {
@@ -3469,6 +3625,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     lastSwap = { undoable: true };
     let ok = false;
     if (input.value.length <= UNDO_CHARS && text.length <= UNDO_CHARS && lineCount(text) <= UNDO_LINES) {
+      if (undoSwaps >= UNDO_KEEP || input.value.length > UNDO_BIG) forgetUndo();
       input.focus({ preventScroll: true });
       input.select();
       try {
@@ -3477,8 +3634,11 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
         ok = false;
       }
       ok = ok && input.value === text;
+      if (ok) undoSwaps++;
     }
     if (!ok) {
+      // The steps under a text set directly would join an old text onto it, so none is kept.
+      forgetUndo();
       direct = { text, note: input.value.length > UNDO_CHARS
         ? 'The text that was replaced is over ' + UNDO_CHARS.toLocaleString('en-US') + ' characters, so it was not kept and cannot be brought back.'
         : 'This text is over ' + UNDO_CHARS.toLocaleString('en-US') + ' characters or ' + UNDO_LINES + ' lines, so the text it replaced was not kept and cannot be brought back.' };
@@ -3582,7 +3742,10 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     if (reason) {
       resetCopy();
       hint(reason);
-      input.blur();
+      // Enter then starts it, as the hint says. A key or a password, or text over the limit,
+      // keeps the focus off Unslop, so that an Enter from habit does not send it.
+      if (tooLong(input.value) || looksSecret(input.value) || unslopBtn.disabled) input.blur();
+      else unslopBtn.focus();
       setTitle('Not sent');
       notify('SlopMonster held what you copied', reason);
       return;
@@ -3593,11 +3756,29 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
 
   // Asks the server for news from outside the page, which is a press of Ctrl+Alt+U. Each
   // answer comes within 25 seconds, and the next request goes out at once.
+  // One loop at a time. After a reconnect the loop from before may still be waiting on its
+  // request, and what that brings back can be a press that must not be lost.
+  // With two windows open, the server hands a press to the one the user was in last, which
+  // each page names by an id of its own.
+  const PAGE_ID = Math.random().toString(36).slice(2, 12) || 'page';
+  function tellFront() {
+    if (state.power === 'on') requestJson('/api/front', { method: 'POST', body: { page: PAGE_ID } }).catch(() => {});
+  }
+  window.addEventListener('focus', tellFront);
+
+  let listening = false;
   async function listen() {
+    if (listening) return;
+    listening = true;
+    if (doc.hasFocus()) tellFront();
+    try { await listenLoop(); } finally { listening = false; }
+  }
+
+  async function listenLoop() {
     while (state.power === 'on') {
       let reply = null;
       try {
-        reply = await requestJson('/api/events');
+        reply = await requestJson('/api/events?page=' + PAGE_ID);
       } catch (err) {
         if (state.power !== 'on') return;
         if (err instanceof ApiError && err.status === 403) { tookOver(err); return; }
@@ -3638,7 +3819,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
         headers: { 'X-Slop-Token': TOKEN, 'X-Slop-Name': encodeURIComponent(file.name), 'Content-Type': 'application/octet-stream' },
       });
     } catch (err) {
-      tookOver(new OfflineError());
+      const lost = new OfflineError();
+      if (!tookOver(lost)) hint(file.name + ' was not opened. ' + lost.message);
       return;
     }
     if (!res.ok) {
@@ -3881,6 +4063,8 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     checkCtrl = null;
   }
 
+  let blockWatch = 0;
+
   function showBlock(kind, detail) {
     if (state.power === 'off') return;
     if (kind !== 'off' && kind !== 'stuck' && state.power !== 'on') return;
@@ -3901,22 +4085,72 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     block.hidden = false;
     blockTitle.focus();
     say(spec.title + ' ' + blockBody.textContent);
+    // A longer network change: back by itself once the same copy answers again. A copy
+    // started again opened a window of its own, which should be the one Ctrl+Alt+U reaches,
+    // so this one waits for the button.
+    clearInterval(blockWatch);
+    if (kind === 'offline') {
+      blockWatch = setInterval(async () => {
+        if (state.blockKind !== 'offline') { clearInterval(blockWatch); return; }
+        if (blockAction.disabled || !(await ping()) || state.blockKind !== 'offline') return;
+        const again = await reconnect(true);
+        if (again === false) {
+          clearInterval(blockWatch);
+          blockBody.textContent = 'SlopMonster was started again. Press Check again to use this window, or close it.';
+          say(blockBody.textContent);
+        }
+      }, 5000);
+    }
+  }
+
+  // Back to work in this same window, so the text in the box and this session's results stay.
+  // A copy started again has a new token, which its page carries. Only a page from another
+  // version of the app needs the window reloaded. With `same`, only the copy this window
+  // already knew is taken, and false says another one answers. null when nothing answers.
+  async function reconnect(same) {
+    let html = '';
+    try {
+      const res = await fetch('/', { cache: 'no-store' });
+      if (!res.ok) return null;
+      html = await res.text();
+    } catch (e) {
+      return null;
+    }
+    const token = (/<meta name="slop-token" content="([^"<>]+)">/.exec(html) || [])[1];
+    const version = (/<p class="set-note" id="app-version">([^<]*)<\/p>/.exec(html) || [])[1];
+    if (!token) return null;
+    if (same && token !== TOKEN) return false;
+    if (state.power !== 'blocked') return true;
+    if (version !== $('app-version').textContent) {
+      window.location.reload();
+      return true;
+    }
+    TOKEN = token;
+    clearInterval(blockWatch);
+    state.power = 'on';
+    state.blockKind = null;
+    root.dataset.power = 'on';
+    bar.inert = false;
+    stage.inert = false;
+    block.hidden = true;
+    powerBtn.disabled = false;
+    powerLabel.textContent = 'Turn off';
+    if (state.view === 'working') showIdle();    // the run was stopped with the block
+    refreshStatus();
+    syncHotkey();
+    listen();
+    scheduleCheck(0);
+    input.focus();
+    say('SlopMonster is running again.');
+    return true;
   }
 
   async function blockActionClicked() {
-    if (state.blockKind !== 'offline') {
-      window.location.reload();
-      return;
-    }
     blockAction.disabled = true;
     blockAction.textContent = 'Checking';
-    const alive = await ping();
-    if (alive) {
-      window.location.reload(); // a fresh page carries the new token
-      return;
-    }
+    if (await reconnect(false)) return;
     blockAction.disabled = false;
-    blockAction.textContent = 'Check again';
+    blockAction.textContent = (BLOCKS[state.blockKind] || BLOCKS.offline).action;
     blockBody.textContent = 'Still not running. Start it from the desktop shortcut, then check again.';
     say(blockBody.textContent);
   }
@@ -4004,7 +4238,13 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
 
   async function errorActionClicked() {
     const action = state.errorAction;
-    if (action === 'retry') { startRun(); return; }
+    if (action === 'retry') {
+      // The error names the AI that failed. After a Try with the other AI, that is not the
+      // one in Settings, and Try again goes to it once more, at the strength it ran with.
+      const failed = state.failed;
+      startRun(false, false, false, failed && failed.redo ? { engine: failed.engine, strength: failed.strength || prefs.strength } : undefined);
+      return;
+    }
     if (action === 'edit') { showIdle(); input.focus(); return; }
     if (action === 'login') { startSignIn(); return; }
     if (action === 'settings') { openSettings(); return; }
@@ -4115,7 +4355,15 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     startRun();
     if (state.view === 'working') cancelBtn.focus();
   });
+  otherBtn.addEventListener('click', () => { if (state.view === 'done') tryOther(state.shown); });
+  errOther.addEventListener('click', () => { if (state.view === 'error') tryOther(state.failed); });
   cancelBtn.addEventListener('click', cancelRun);
+  contextInput.addEventListener('input', paintContext);
+  contextClear.addEventListener('click', () => {
+    contextInput.value = '';
+    paintContext();
+    contextInput.focus();
+  });
   copyBtn.addEventListener('click', copyResult);
   resultBox.addEventListener('click', (event) => {
     const button = event.target.closest('.chg-btn');
@@ -4180,6 +4428,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   strengthRadios.forEach((radio) => radio.addEventListener('change', () => {
     if (radio.checked) setPref('strength', radio.value, 'slop-strength');
     paintIdleNote();      // Thorough rewrites text that already passes
+    paintPill();
   }));
   claudeCustom.addEventListener('input', () => setPref('claudeCustom', claudeCustom.value.trim(), 'slop-claude-custom'));
   gptCustom.addEventListener('input', () => setPref('gptCustom', gptCustom.value.trim(), 'slop-gpt-custom'));
@@ -4250,6 +4499,7 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
       state.source = entry.source;
     }
     contextInput.value = entry.context;
+    paintContext();
     state.dirty = false;
     paintInput();
     scheduleCheck(0);
@@ -4257,6 +4507,17 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
   });
 
   doc.addEventListener('keydown', (event) => {
+    // A reload clears the box and the results, which are kept nowhere else, so the first F5
+    // or Ctrl+R only says so. A second within 4 seconds reloads; a key held down does not.
+    if ((event.key === 'F5' || ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key || '').toLowerCase() === 'r'))
+      && state.power === 'on' && (state.history.length || state.view === 'working' || input.value)) {
+      if (event.repeat || Date.now() - reloadAskedAt > 4000) {
+        event.preventDefault();
+        if (!event.repeat) reloadAskedAt = Date.now();
+        hint(RELOAD_WARN);
+      }
+      return;
+    }
     const key = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey ? String(event.key || '').toLowerCase() : '';
     if (key === 's' || key === 'o') {
       // Always this page's: the browser would offer to save the page, or open the file in this
@@ -4271,7 +4532,12 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
     }
     // With Settings open, Esc closes it and the page's own keys wait.
     if (state.power !== 'on' || settings.open) return;
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {
+      // Try with the other AI, from whichever view offers it.
+      event.preventDefault();
+      if (state.view === 'done' && !otherBtn.hidden) otherBtn.click();
+      else if (state.view === 'error' && !errOther.hidden) errOther.click();
+    } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
       event.preventDefault();
       if (!unslopBtn.disabled) startRun();
     } else if (event.key === 'Escape' && state.view === 'working') {
@@ -4289,6 +4555,28 @@ html[data-theme="light"] .settings::backdrop { background: rgb(60 30 120 / .18);
       else if (direct) hint(direct.note);
     }
   });
+
+  // The background drifts only while someone is at the window (see html[data-still]). Not
+  // capture listeners on window, so the page's own blur() of a box does not count.
+  let stillTimer = 0;
+  let wokeAt = 0;
+  const holdStill = () => { clearTimeout(stillTimer); root.setAttribute('data-still', ''); };
+  const drift = () => {
+    if (doc.hidden || !doc.hasFocus()) return;
+    const now = Date.now();
+    if (now - wokeAt < 1000 && !root.hasAttribute('data-still')) return;   // pointermove comes often
+    wokeAt = now;
+    root.removeAttribute('data-still');
+    clearTimeout(stillTimer);
+    stillTimer = setTimeout(holdStill, 60000);
+  };
+  window.addEventListener('blur', holdStill);
+  window.addEventListener('focus', drift);
+  doc.addEventListener('visibilitychange', () => (doc.hidden ? holdStill() : drift()));
+  ['pointermove', 'pointerdown', 'keydown', 'wheel'].forEach((name) => {
+    doc.addEventListener(name, drift, { capture: true, passive: true });
+  });
+  if (doc.hidden || !doc.hasFocus()) holdStill(); else drift();
 
   // Coming back from a terminal after signing in: look again without being asked.
   window.addEventListener('focus', () => {

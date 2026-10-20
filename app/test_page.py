@@ -54,7 +54,7 @@ if not browser:
 # ── a sandbox: no real data folder, model, sign-in or clipboard ──────────────
 tmp = tempfile.mkdtemp(prefix='slop-page-')
 server.DATA_DIR = os.path.join(tmp, 'data')
-CONTROL, CALLS, HOTKEY = (os.path.join(tmp, n) for n in ('control.json', 'calls.jsonl', 'hotkey.txt'))
+CONTROL, CALLS, HOTKEY, COPIES = (os.path.join(tmp, n) for n in ('control.json', 'calls.jsonl', 'hotkey.txt', 'copies.txt'))
 MARKER = '<<<SLOPMONSTER-NOTES>>>'
 # What the stand-in model changes. The first makes the page test's sample pass the checker.
 FIXES = [("Are you ready to unlock seamless scheduling? Our game-changing tool empowers clinic managers — "
@@ -64,8 +64,17 @@ FIXES = [("Are you ready to unlock seamless scheduling? Our game-changing tool e
          ("It's not just a tool, it's a game-changing journey.", 'It is a tool.'),
          ('4,000 clinics', 'thousands of clinics'),
          ('began shortly afterwards', 'began soon after'),
-         # Text that passes, made worse: the rewrite adds a list of three.
-         ('The tool reads one file.', 'The tool reads files, folders, and links.')]
+         # Text that passes, made worse: the rewrite adds a word the checker flags.
+         ('The tool reads one file.', 'The tool reads one robust file.'),
+         # A list of three left in place: it never stops a pass.
+         ('We leverage notes, calls, and emails.', 'We use notes, calls, and emails.'),
+         # A chat answer with bold labels: only the word is fixed, and the labels stay.
+         ('a seamless handover', 'a handover'),
+         # A chat answer whose bold labels the rewrite folds, for Keep original to put back.
+         ('a robust launch', 'a launch'), ('- **Budget:** We spend', '- We spend'),
+         ('- **Timing:** We start', '- We start'), ('- **Owner:** Our team', '- Our team'),
+         # A rewrite that adds a caveat the draft did not have.
+         ('Our robust backups run every night at two.', 'Our backups generally run every night at two, though timing varies.')]
 
 
 def control():
@@ -80,7 +89,8 @@ _calls_lock = threading.Lock()
 
 def fake(engine, system_prompt, message, cancel):
     """The model: waits `delay` seconds, fails with `fail` when set, else applies FIXES.
-    With `fail_from`, only the calls after that many in calls.jsonl fail."""
+    With `fail_from`, only the calls after that many in calls.jsonl fail, and with
+    `fail_engine` only the calls to that engine."""
     c = control()
     with _calls_lock, open(CALLS, 'a+', encoding='utf-8') as fh:
         fh.write(json.dumps({'engine': engine, 'custom': 'CUSTOM-PROMPT-MARK' in system_prompt,
@@ -90,7 +100,7 @@ def fake(engine, system_prompt, message, cancel):
     for _ in range(int(float(c.get('delay', 1)) * 10)):
         if cancel.wait(0.1):
             raise server.EngineError('cancelled', server.STOPPED)
-    if c.get('fail') and made > int(c.get('fail_from', 0)):
+    if c.get('fail') and (not c.get('fail_engine') or c['fail_engine'] == engine) and made > int(c.get('fail_from', 0)):
         raise server.EngineError(c['fail'], 'The stand-in model failed on purpose.')
     text = message.split('TEXT TO EDIT:\n', 1)[-1]
     for old, new in FIXES:
@@ -123,7 +133,16 @@ server.engine_status = claude_status
 server.chatgpt_status = chatgpt_status
 server.start_sign_in = lambda *a, **k: True
 server.clipboard_text = lambda: control().get('clipboard')
-server.set_clipboard = lambda text: True
+
+
+def set_clipboard(text):
+    """The clipboard: each copy the server makes adds a line to copies.txt."""
+    with _calls_lock, open(COPIES, 'a', encoding='utf-8') as fh:
+        fh.write('copied\n')
+    return True
+
+
+server.set_clipboard = set_clipboard
 server.launch_window = lambda url: False
 
 
