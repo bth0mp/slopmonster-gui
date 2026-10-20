@@ -485,6 +485,8 @@ async function edges() {
   await fresh({ delay: 0.2 }, claude);
   await paste('```python\ndef add(a, b):\n    return a + b\n```');
   await waitFor(`document.documentElement.dataset.run === 'error'`);
+  // The check of the paste is its own request, and on a slow machine it lands after the run's error.
+  await waitFor(`document.getElementById('check-empty-text').textContent.startsWith('The checker leaves')`);
   got = await js(`[document.getElementById('err-title').textContent, document.getElementById('err-body').textContent, document.getElementById('check-empty-text').textContent]`);
   check('code blocks alone: the error says they are left as they are', got[0] === 'There is nothing to unslop'
     && got[1] === 'SlopMonster leaves code blocks as they are, and this text has nothing outside them to rewrite.', got);
