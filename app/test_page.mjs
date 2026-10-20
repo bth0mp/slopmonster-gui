@@ -912,6 +912,9 @@ async function recovery() {
   // The background drifts only while someone is at the window (SOAK-1): an idle window left
   // open all day kept the GPU drawing every frame.
   await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  // A machine with Windows animations off (GitHub's runners) asks for reduced motion, and
+  // then the background has no animation to pause at all.
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await fresh();
   const drift = () => js(`JSON.stringify({ still: document.documentElement.hasAttribute('data-still'),
     play: getComputedStyle(document.querySelector('.b1')).animationPlayState })`).then(JSON.parse);
@@ -925,6 +928,7 @@ async function recovery() {
   d = await drift();
   check('... and drifts again once the focus is back', !d.still && d.play === 'running', d);
   await send('Emulation.setFocusEmulationEnabled', { enabled: false });
+  await send('Emulation.setEmulatedMedia', { features: [] });
 
   // Requests to the API fail while `cut` is 2, as when the network changes on waking from
   // sleep. cut === 1 fails the next check only.
