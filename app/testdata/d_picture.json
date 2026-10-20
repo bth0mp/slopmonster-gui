@@ -1,0 +1,103 @@
+{
+ "file": "d_picture.docx",
+ "sha256": "11de25676965c20642e2188d673f290592053d3a778d0e3dfe1c7b77c111289e",
+ "source": "authored in Word 16 for the in-place rewrite test corpus (d_picture)",
+ "exercises": "an inline picture alone in a paragraph and one inside a sentence, a caption with a SEQ field, a text box anchored to a paragraph",
+ "blocks": [
+  "# Harbour survey photographs",
+  "The photograph below was taken from the north pier at low tide.",
+  "Figure 1: The inner harbour at low tide",
+  "Each survey sheet carries a small marker  like this one beside the grid reference.",
+  "The side note alongside this paragraph records who carried out the survey.",
+  "Further photographs are held in the project archive."
+ ],
+ "edit": {
+  "what": "'photographs' becomes 'images'; 'inner harbour' becomes 'outer basin'; 'small marker' becomes 'printed symbol'; 'beside' becomes 'next to'; 'records' becomes 'shows'; 'carried out' becomes 'completed'",
+  "new_blocks": [
+   "# Harbour survey images",
+   "The photograph below was taken from the north pier at low tide.",
+   "Figure 1: The outer basin at low tide",
+   "Each survey sheet carries a printed symbol  like this one next to the grid reference.",
+   "The side note alongside this paragraph shows who completed the survey.",
+   "Further photographs are held in the project archive."
+  ],
+  "blocks_after": [
+   "# Harbour survey images",
+   "The photograph below was taken from the north pier at low tide.",
+   "Figure 1: The outer basin at low tide",
+   "Each survey sheet carries a printed symbol  like this one next to the grid reference.",
+   "The side note alongside this paragraph shows who completed the survey.",
+   "Further photographs are held in the project archive."
+  ],
+  "notes": [],
+  "checks": [
+   {
+    "check": "other_parts_identical"
+   },
+   {
+    "check": "root_tag_identical"
+   },
+   {
+    "check": "paragraphs_unchanged_except",
+    "paragraphs": [
+     0,
+     3,
+     4,
+     5
+    ]
+   },
+   {
+    "check": "markup_between_paragraphs_identical"
+   },
+   {
+    "check": "paragraph",
+    "text": "Harbour survey images",
+    "style": "Heading1"
+   },
+   {
+    "check": "paragraph",
+    "text": "Figure 1: The outer basin at low tide",
+    "style": "Caption"
+   },
+   {
+    "check": "paragraph_holds",
+    "text": "Each survey sheet carries a printed symbol  like this one next to the grid reference.",
+    "tag": "w:drawing",
+    "count": 1
+   },
+   {
+    "check": "paragraph_holds",
+    "text": "The side note alongside this paragraph shows who completed the survey.",
+    "tag": "w:txbxContent",
+    "count": 2
+   },
+   {
+    "check": "text_boxes_unchanged",
+    "count": 2
+   },
+   {
+    "check": "field_codes_unchanged"
+   },
+   {
+    "check": "count",
+    "tag": "w:drawing",
+    "equals": 3
+   },
+   {
+    "check": "count",
+    "tag": "w:pict",
+    "equals": 1
+   },
+   {
+    "check": "count",
+    "tag": "mc:AlternateContent",
+    "equals": 1
+   },
+   {
+    "check": "count",
+    "tag": "w:p",
+    "equals": 11
+   }
+  ]
+ }
+}

@@ -1,0 +1,101 @@
+name: release
+
+# A tag such as v1.0.0 builds SlopMonster.exe and attaches it, with its SHA-256, to the
+# GitHub Release for that tag. Run by hand, it builds the same files and keeps them as a
+# workflow artifact only. The tag should match VERSION in app/version.py.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# Read-only for the build, which runs pip packages, PyInstaller and the tests. Only the
+# release job below, which runs nothing but gh, can write to the repository.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      # test_page.py needs Node 22 for its WebSocket; Edge is already on the runner.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: The tag matches app/version.py
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $version = python -c "import sys; sys.path.insert(0, 'app'); import version; print(version.VERSION)"
+          if ("v$version" -ne $env:TAG) { throw "The tag is $env:TAG but app/version.py says $version." }
+
+      - name: Install the build tools
+        run: python -m pip install -r packaging/requirements-build.txt
+
+      # Every one of these stands in for Claude Code and Codex, so none needs them installed.
+      - name: App tests
+        run: |
+          python -P -E app/test_server.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -P -E app/test_documents.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -P -E app/test_wordfile.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -P -E app/test_page.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Build SlopMonster.exe
+        run: powershell -ExecutionPolicy Bypass -File packaging/build.ps1
+
+      - name: Smoke-test the exe
+        run: python packaging/smoke_exe.py dist/SlopMonster.exe
+
+      - name: Checksum
+        working-directory: dist
+        run: |
+          $hash = (Get-FileHash SlopMonster.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  SlopMonster.exe" | Out-File -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: SlopMonster
+          if-no-files-found: error
+          path: |
+            dist/SlopMonster.exe
+            dist/SHA256SUMS.txt
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: SlopMonster
+          path: dist
+
+      # Create the release with its notes before pushing the tag; this only fills in a
+      # release when there is none.
+      - name: Attach to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "SlopMonster GUI $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/SlopMonster.exe dist/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber

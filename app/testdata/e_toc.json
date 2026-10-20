@@ -1,0 +1,112 @@
+{
+ "file": "e_toc.docx",
+ "sha256": "f5dc5b86dd4b1e374f68abdd11fed5bbe25b5461af3b503d62971c2b3d50578b",
+ "source": "written by Word 16 through its object model for the table of contents test (e_toc): the paragraphs typed, then the \"Automatic Table 1\" gallery entry inserted and updated",
+ "exercises": "a table of contents from Word's gallery: a content control around a TOC field, its TOC Heading title, toc 1 and toc 2 lines that are links to _Toc bookmarks with a PAGEREF field each, and a last paragraph holding only the end of the field; Title and Heading 1/2",
+ "blocks": [
+  "# Harbour Annual Review",
+  "Contents",
+  "# Unlocking growth",
+  "Berth income rose by a fifth this year, and the waiting list for visitor moorings is now closed until spring.",
+  "## Seamless ferry connections",
+  "The new timetable meets every ferry with a bus, and the last one waits for late sailings.",
+  "# Next steps",
+  "The council will decide on the second phase in June."
+ ],
+ "edit": {
+  "what": "'Unlocking growth' becomes 'Growing income'; 'Seamless ferry connections' becomes 'Ferry connections'; 'spring' becomes 'April'. The table of contents is not in the blocks, so it still names the old headings until Word updates it",
+  "new_blocks": [
+   "# Harbour Annual Review",
+   "Contents",
+   "# Growing income",
+   "Berth income rose by a fifth this year, and the waiting list for visitor moorings is now closed until April.",
+   "## Ferry connections",
+   "The new timetable meets every ferry with a bus, and the last one waits for late sailings.",
+   "# Next steps",
+   "The council will decide on the second phase in June."
+  ],
+  "blocks_after": [
+   "# Harbour Annual Review",
+   "Contents",
+   "# Growing income",
+   "Berth income rose by a fifth this year, and the waiting list for visitor moorings is now closed until April.",
+   "## Ferry connections",
+   "The new timetable meets every ferry with a bus, and the last one waits for late sailings.",
+   "# Next steps",
+   "The council will decide on the second phase in June."
+  ],
+  "notes": [],
+  "checks": [
+   {
+    "check": "other_parts_identical"
+   },
+   {
+    "check": "root_tag_identical"
+   },
+   {
+    "check": "paragraphs_unchanged_except",
+    "paragraphs": [
+     6,
+     7,
+     8
+    ]
+   },
+   {
+    "check": "markup_between_paragraphs_identical"
+   },
+   {
+    "check": "paragraph",
+    "text": "Contents",
+    "style": "TOCHeading"
+   },
+   {
+    "check": "paragraph",
+    "text": "Growing income",
+    "style": "Heading1"
+   },
+   {
+    "check": "paragraph",
+    "text": "Ferry connections",
+    "style": "Heading2"
+   },
+   {
+    "check": "hyperlink",
+    "text": "Unlocking growth\t1",
+    "anchor": "_Toc242868907"
+   },
+   {
+    "check": "hyperlink",
+    "text": "Seamless ferry connections\t1",
+    "anchor": "_Toc242868908"
+   },
+   {
+    "check": "hyperlink",
+    "text": "Next steps\t1",
+    "anchor": "_Toc242868909"
+   },
+   {
+    "check": "field_codes_unchanged"
+   },
+   {
+    "check": "count",
+    "tag": "w:sdt",
+    "equals": 1
+   },
+   {
+    "check": "count",
+    "tag": "w:bookmarkStart",
+    "equals": 3
+   },
+   {
+    "check": "count",
+    "tag": "w:hyperlink",
+    "equals": 3
+   },
+   {
+    "check": "count",
+    "tag": "w:p",
+    "equals": 12
+   }
+  ]
+ }
+}

@@ -1,0 +1,185 @@
+{
+ "file": "c_tables.docx",
+ "sha256": "ba4407504408b0073ff0c16df1b3685d28e8d85a7d4b04eba2d123e66b9c207d",
+ "source": "authored in Word 16 for the in-place rewrite test corpus (c_tables)",
+ "exercises": "four tables: a bold header row and an italic word, a cell merged across three columns, an empty cell, a two-paragraph cell, a vertical merge",
+ "blocks": [
+  "# Quarterly figures",
+  "The table below summarises income by region for the last quarter.",
+  "Region | Income | Comment",
+  "North | 1,240 | Rose slightly on last year",
+  "South | 980 | Fell after the ferry closure",
+  "Staffing is shown separately because several posts are shared.",
+  "Staffing by department",
+  "Department | Posts | Vacancies",
+  "Planning | 14 | 2",
+  "Estates | 9 | ",
+  "Notes on individual projects are recorded in the final table.",
+  "Project | Notes",
+  "Quay wall | Phase one complete.\nPhase two starts in May.",
+  "Car park | Resurfacing delayed by weather.",
+  "A vertical merge is used where one team covers two sites.",
+  "Team | Site",
+  "Maintenance | East pier",
+  " | West pier",
+  "All figures are provisional until the audit is complete."
+ ],
+ "edit": {
+  "what": "'summarises' becomes 'sets out'; 'last year' becomes 'the previous year'; 'Staffing by' becomes 'Staff numbers by'; 'West pier' becomes 'West quay'",
+  "new_blocks": [
+   "# Quarterly figures",
+   "The table below sets out income by region for the last quarter.",
+   "Region | Income | Comment",
+   "North | 1,240 | Rose slightly on the previous year",
+   "South | 980 | Fell after the ferry closure",
+   "Staffing is shown separately because several posts are shared.",
+   "Staff numbers by department",
+   "Department | Posts | Vacancies",
+   "Planning | 14 | 2",
+   "Estates | 9 | ",
+   "Notes on individual projects are recorded in the final table.",
+   "Project | Notes",
+   "Quay wall | Phase one complete.\nPhase two starts in May.",
+   "Car park | Resurfacing delayed by weather.",
+   "A vertical merge is used where one team covers two sites.",
+   "Team | Site",
+   "Maintenance | East pier",
+   " | West quay",
+   "All figures are provisional until the audit is complete."
+  ],
+  "blocks_after": [
+   "# Quarterly figures",
+   "The table below sets out income by region for the last quarter.",
+   "Region | Income | Comment",
+   "North | 1,240 | Rose slightly on the previous year",
+   "South | 980 | Fell after the ferry closure",
+   "Staffing is shown separately because several posts are shared.",
+   "Staff numbers by department",
+   "Department | Posts | Vacancies",
+   "Planning | 14 | 2",
+   "Estates | 9 | ",
+   "Notes on individual projects are recorded in the final table.",
+   "Project | Notes",
+   "Quay wall | Phase one complete.\nPhase two starts in May.",
+   "Car park | Resurfacing delayed by weather.",
+   "A vertical merge is used where one team covers two sites.",
+   "Team | Site",
+   "Maintenance | East pier",
+   " | West quay",
+   "All figures are provisional until the audit is complete."
+  ],
+  "notes": [],
+  "checks": [
+   {
+    "check": "other_parts_identical"
+   },
+   {
+    "check": "root_tag_identical"
+   },
+   {
+    "check": "paragraphs_unchanged_except",
+    "paragraphs": [
+     1,
+     7,
+     12,
+     36
+    ]
+   },
+   {
+    "check": "markup_between_paragraphs_identical"
+   },
+   {
+    "check": "cell",
+    "table": 1,
+    "row": 2,
+    "cell": 3,
+    "text": "Rose slightly on the previous year",
+    "paragraphs": 1
+   },
+   {
+    "check": "run",
+    "text": "slightly",
+    "has": [
+     "w:i"
+    ]
+   },
+   {
+    "check": "run",
+    "text": "Region",
+    "has": [
+     "w:b"
+    ]
+   },
+   {
+    "check": "cell",
+    "table": 2,
+    "row": 1,
+    "cell": 1,
+    "text": "Staff numbers by department",
+    "paragraphs": 1
+   },
+   {
+    "check": "cell",
+    "table": 2,
+    "row": 4,
+    "cell": 3,
+    "text": "",
+    "paragraphs": 1
+   },
+   {
+    "check": "cell",
+    "table": 3,
+    "row": 2,
+    "cell": 2,
+    "text": "Phase one complete.\nPhase two starts in May.",
+    "paragraphs": 2
+   },
+   {
+    "check": "cell",
+    "table": 4,
+    "row": 3,
+    "cell": 1,
+    "text": "",
+    "paragraphs": 1
+   },
+   {
+    "check": "cell",
+    "table": 4,
+    "row": 3,
+    "cell": 2,
+    "text": "West quay",
+    "paragraphs": 1
+   },
+   {
+    "check": "paragraph",
+    "text": "Quarterly figures",
+    "style": "Heading1"
+   },
+   {
+    "check": "count",
+    "tag": "w:tbl",
+    "equals": 4
+   },
+   {
+    "check": "count",
+    "tag": "w:tr",
+    "equals": 13
+   },
+   {
+    "check": "count",
+    "tag": "w:tc",
+    "equals": 31
+   },
+   {
+    "check": "count",
+    "tag": "w:gridSpan",
+    "equals": 1
+   },
+   {
+    "check": "count",
+    "tag": "w:vMerge",
+    "equals": 2
+   }
+  ]
+ }
+}

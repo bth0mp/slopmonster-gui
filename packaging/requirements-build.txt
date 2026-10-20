@@ -1,0 +1,13 @@
+# What packaging/build.ps1 needs, every package pinned, so a release build uses the versions
+# a local one was tested with. cryptography and the two below it let the exe open AES PDFs.
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.8
+altgraph==0.17.5
+pefile==2024.8.26
+packaging==26.3
+pywin32-ctypes==0.2.3
+setuptools==84.2.0
+pypdf==6.16.1
+cryptography==50.0.0
+cffi==2.1.0
+pycparser==3.0

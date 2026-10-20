@@ -1,0 +1,195 @@
+{
+ "file": "a_prose.docx",
+ "sha256": "7d7abea4a54e0e2b3bf3f3b0daf9a751dc24949f0a57ea22ca675fbbb33f95ab",
+ "source": "authored in Word 16 for the in-place rewrite test corpus (a_prose)",
+ "exercises": "Title and Heading 1/2, bold, italic, underlined and coloured words, two fonts, two hyperlinks, manual line breaks, runs split by rsid",
+ "blocks": [
+  "# Harbour Renewal Programme",
+  "# Background and purpose",
+  "The council approved the budget in March, and the first phase of works began shortly afterwards on the eastern quay.",
+  "Engineers found that the sea wall was structurally sound but that the drainage channels needed urgent and costly attention before winter.",
+  "Full survey results are published on the project website and are updated every quarter.",
+  "## Funding",
+  "Most of the funding comes from the regional growth fund, with the remainder raised through local bonds issued last year.",
+  "Important: residents should expect some disruption, particularly at weekends, while the new moorings are installed.",
+  "## Timetable",
+  "The second phase is planned for the autumn. It depends on the outcome of the tender. A further update will follow in June.",
+  "Questions about the programme can be sent to the harbour office at any time.",
+  "The contractor has now reorganised the delivery schedule to avoid the busiest ferry sailings.",
+  "Harbour Office\nQuay Street\nOpen weekdays from nine until five",
+  "Contact the harbour office for berth allocations and visitor moorings.",
+  "Draft for consultation. Comments are welcome until the end of the month."
+ ],
+ "edit": {
+  "what": "'March' becomes 'April'; 'works began' becomes 'construction started'; 'published' becomes 'available'; 'Funding' becomes 'Funding sources'; 'harbour office' becomes 'duty manager'; 'Quay Street' becomes 'Quay Road'",
+  "new_blocks": [
+   "# Harbour Renewal Programme",
+   "# Background and purpose",
+   "The council approved the budget in April, and the first phase of construction started shortly afterwards on the eastern quay.",
+   "Engineers found that the sea wall was structurally sound but that the drainage channels needed urgent and costly attention before winter.",
+   "Full survey results are available on the project website and are updated every quarter.",
+   "## Funding sources",
+   "Most of the funding comes from the regional growth fund, with the remainder raised through local bonds issued last year.",
+   "Important: residents should expect some disruption, particularly at weekends, while the new moorings are installed.",
+   "## Timetable",
+   "The second phase is planned for the autumn. It depends on the outcome of the tender. A further update will follow in June.",
+   "Questions about the programme can be sent to the harbour office at any time.",
+   "The contractor has now reorganised the delivery schedule to avoid the busiest ferry sailings.",
+   "Harbour Office\nQuay Road\nOpen weekdays from nine until five",
+   "Contact the duty manager for berth allocations and visitor moorings.",
+   "Draft for consultation. Comments are welcome until the end of the month."
+  ],
+  "blocks_after": [
+   "# Harbour Renewal Programme",
+   "# Background and purpose",
+   "The council approved the budget in April, and the first phase of construction started shortly afterwards on the eastern quay.",
+   "Engineers found that the sea wall was structurally sound but that the drainage channels needed urgent and costly attention before winter.",
+   "Full survey results are available on the project website and are updated every quarter.",
+   "## Funding sources",
+   "Most of the funding comes from the regional growth fund, with the remainder raised through local bonds issued last year.",
+   "Important: residents should expect some disruption, particularly at weekends, while the new moorings are installed.",
+   "## Timetable",
+   "The second phase is planned for the autumn. It depends on the outcome of the tender. A further update will follow in June.",
+   "Questions about the programme can be sent to the harbour office at any time.",
+   "The contractor has now reorganised the delivery schedule to avoid the busiest ferry sailings.",
+   "Harbour Office\nQuay Road\nOpen weekdays from nine until five",
+   "Contact the duty manager for berth allocations and visitor moorings.",
+   "Draft for consultation. Comments are welcome until the end of the month."
+  ],
+  "notes": [],
+  "checks": [
+   {
+    "check": "other_parts_identical"
+   },
+   {
+    "check": "root_tag_identical"
+   },
+   {
+    "check": "paragraphs_unchanged_except",
+    "paragraphs": [
+     2,
+     4,
+     6,
+     13,
+     14
+    ]
+   },
+   {
+    "check": "markup_between_paragraphs_identical"
+   },
+   {
+    "check": "run",
+    "text": "budget",
+    "has": [
+     "w:b"
+    ]
+   },
+   {
+    "check": "run",
+    "text": "first phase",
+    "has": [
+     "w:i"
+    ]
+   },
+   {
+    "check": "run",
+    "text": "April",
+    "lacks": [
+     "w:b",
+     "w:i"
+    ]
+   },
+   {
+    "check": "run",
+    "text": "construction started",
+    "lacks": [
+     "w:b",
+     "w:i"
+    ]
+   },
+   {
+    "check": "run",
+    "text": "structurally sound",
+    "has": [
+     "w:u"
+    ]
+   },
+   {
+    "check": "run",
+    "text": "drainage channels",
+    "has": [
+     "w:color"
+    ]
+   },
+   {
+    "check": "run",
+    "text": "regional growth fund",
+    "has": [
+     "w:rFonts",
+     "w:sz"
+    ]
+   },
+   {
+    "check": "run",
+    "text": "local bonds",
+    "has": [
+     "w:rFonts",
+     "w:sz"
+    ]
+   },
+   {
+    "check": "hyperlink",
+    "text": "project website",
+    "target": "https://example.org/harbour/survey"
+   },
+   {
+    "check": "not_in_hyperlink",
+    "text": "available"
+   },
+   {
+    "check": "hyperlink",
+    "text": "duty manager",
+    "target": "mailto:harbour@example.org"
+   },
+   {
+    "check": "not_in_hyperlink",
+    "text": "Contact the"
+   },
+   {
+    "check": "paragraph",
+    "text": "Funding sources",
+    "style": "Heading2"
+   },
+   {
+    "check": "paragraph",
+    "text": "Harbour Renewal Programme",
+    "style": "Title"
+   },
+   {
+    "check": "paragraph",
+    "text": "Background and purpose",
+    "style": "Heading1"
+   },
+   {
+    "check": "paragraph",
+    "text": "Harbour Office\nQuay Road\nOpen weekdays from nine until five",
+    "style": null
+   },
+   {
+    "check": "count",
+    "tag": "w:br",
+    "equals": 2
+   },
+   {
+    "check": "count",
+    "tag": "w:hyperlink",
+    "equals": 2
+   },
+   {
+    "check": "count",
+    "tag": "w:p",
+    "equals": 16
+   }
+  ]
+ }
+}

@@ -3,6 +3,38 @@ audience from the supplied context. Preserve the author's position and level of
 formality. A README needs a clear explanation and usable instructions. A sales
 page or script may need a different opening.
 
+PASS 0: A CHAT REPLY AROUND A DRAFT
+Apply this pass only when the pattern check names chat framing: a chat opener, a
+draft handover, an offer to redo or edit, notes to the requester, a remark on the
+edit, an option menu, a version label or a bold subject line. The text is then
+probably an assistant's chat reply. Return only what the requester asked for: the
+email, post, bio, letter, README or explanation itself. A flagged line that speaks
+to the text's own reader belongs to the draft: a person's email can say "Here's the
+agenda:" or "Would you like me to book the room?" to its recipient. Keep such a line
+as it is and say in your notes why it stays. Delete, do not rephrase, what speaks to
+the requester about the draft:
+- an opening addressed to the requester ("Sure!", "Great question!", "Here's a
+  draft you can adapt:", "Here's a polished version:");
+- version labels ("Option 1 (concise):", "Version 2:"). If the reply holds several
+  versions, keep the first one in full, delete the others and name them in the
+  notes;
+- the "---" rule that fences the draft, and everything after it that talks to the
+  requester: notes on what changed, tips, assumptions, offers ("Want me to make it
+  warmer?", "I can also...", "If you share X, I can...");
+- remarks about the edit inside the text ("I kept it concise", "fill in the
+  bracketed parts").
+If the reply shows the draft inside a blockquote or quotation marks, return the
+draft without them.
+Do not turn a deleted line into a new sentence about the draft, and do not change
+the draft because of what a deleted line said. Move an assumption, correction or
+open question it raised into your notes. Keep placeholders such as [Your Name]
+exactly as they are. Keep a subject line word for word, with its label in the
+draft's own language, and remove only the bold around it. That is the only bold
+to remove: keep every other bold and italic in the draft as it is.
+Replace a signpost heading such as "Key takeaways" or "The short version" with one
+that names its content, or drop it. When you are told to return the same number
+of blocks, that rule comes first: delete nothing and leave the framing in place.
+
 PASS 1: PURPOSE AND FLOW
 - Make the opening answer the reader's first question about the subject.
 - Remove duplicate hooks and curiosity gaps that delay necessary information.
@@ -36,9 +68,13 @@ ABSOLUTE RULES
 - Never invent a fact, statistic, quote, customer, logo, rating or result.
 - If necessary information is missing, use a clear placeholder such as
   [needs number] and explain the gap in the notes. Do not guess.
-- Preserve factual meaning and technical behavior. Flag a questionable claim in
-  the notes instead of silently replacing it with an unsupported claim.
-- Preserve HTML tags, Markdown structure, links and placeholders exactly.
+- Preserve factual meaning and technical behavior. Keep how sure the author is:
+  do not add a hedge, caveat or qualification the draft did not have, and do not
+  weaken, replace or remove a claim or conclusion because you doubt it. Put the
+  doubt in the notes instead.
+- Preserve HTML tags, Markdown structure, links and placeholders exactly, except
+  the chat framing PASS 0 removes. A bracketed placeholder such as [Your Name]
+  stays as it is.
 - Leave code blocks, commands, inline code and intentionally quoted examples
   unchanged. They may document the very patterns being discussed.
 - Keep the author's register. Do not add an opinion the author did not express.

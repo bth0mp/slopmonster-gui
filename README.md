@@ -1,174 +1,192 @@
-# SlopMonster
+# SlopMonster GUI
 
-![The five SlopMonster mascots, one for each scoring category](docs/img/hero.png)
+SlopMonster GUI is a Windows app that scores a piece of writing for common AI writing
+patterns and then has an AI rewrite it until the checker passes. It runs the Claude Code
+or Codex command-line tool already signed in on your PC, so text Claude wrote can be
+rewritten by ChatGPT and text ChatGPT wrote can be rewritten by Claude.
 
-SlopMonster checks English writing for common AI writing patterns and provides
-instructions for editing the draft. Use it on a README, a landing page, an email or
-a script.
+![SlopMonster in the dark theme: a pasted draft scored 2/5 on the left, the rewrite scored 5/5 on the right](docs/img/app-dark.png)
 
-The Python checker reports matches in five categories and gives the text a score
-out of 5. The editing workflow asks an AI agent to review the draft for its intended
-reader, revise it, and request another pass from a different model family.
+**[Download SlopMonster.exe](https://github.com/bth0mp/slopmonster-gui/releases/latest)**
+for Windows 10 or 11. It needs Claude Code or the Codex CLI, signed in; see
+[Requirements](#requirements).
 
-A score of 5/5 means the checker found no scored matches. You still need to review
-whether the text makes sense, supports its claims and gives the reader what they
-came for. The previous version of this README passed while using repetitive
-metaphors and vague contrasts. That exposed a gap in the editing guidance.
+## What it does
+
+- **Paste, or press Ctrl+Alt+U anywhere.** Press Ctrl+V in the window and the left pane
+  shows a score out of 5 with every phrase the checker flagged. Unslop sends the text for
+  a rewrite, up to three rounds, and the right pane shows the result with its new score.
+  From any other program, copy some text and press Ctrl+Alt+U: SlopMonster rewrites it
+  and, when a Light rewrite passes and every number and link carried over, puts it back on
+  the clipboard for you to paste.
+- **Word and PDF files.** Open a `.docx` and Save as Word writes a copy in which only the
+  words have changed. Fonts, styles, tables, images, headers and page layout stay as they
+  were, and your original file is never modified. A PDF is read as text and saved as a new
+  Word document. Plain `.txt` and `.md` files open too.
+- **The other company's AI does the rewrite.** Choose ChatGPT (through OpenAI's Codex
+  CLI) or Claude (through Claude Code) in Settings. Send Claude's drafts to ChatGPT and
+  ChatGPT's drafts to Claude, so the rewrite is not a model checking its own habits. Each
+  run counts against your own ChatGPT or Claude plan.
+- **Light or Thorough.** Light makes small edits and fixes each thing the checker flagged.
+  Thorough also goes through the text sentence by sentence and rewrites what still reads as
+  machine-written, using SlopMonster's two editing guides.
+- **Instructions you can edit.** Settings shows the instructions the AI gets before your
+  text. Change them and save, and every run uses your copy. Reset to default brings the
+  original back.
+- **A Changes view.** Switch from Result to Changes to see your words struck through and
+  the new ones highlighted. Keep original puts one paragraph back as you wrote it.
+- **Checks before you copy.** Under the result, SlopMonster lists any number, link, email
+  address or `[placeholder]` that differs between your text and the rewrite, so a changed
+  price or a dropped link is easy to spot.
+- **A dark theme and a light one.** The button beside Settings switches between them.
+
+![SlopMonster in the light theme after a run](docs/img/app-light.png)
+
+<table>
+  <tr>
+    <td><img src="docs/img/app-changes.png" alt="The Changes view: removed words struck through, new words highlighted, with a Keep original button under the paragraph"></td>
+    <td><img src="docs/img/app-settings.png" alt="Settings: the choice of ChatGPT or Claude, the model, Light or Thorough, and the rewrite instructions"></td>
+  </tr>
+  <tr>
+    <td align="center">The Changes view</td>
+    <td align="center">Settings</td>
+  </tr>
+</table>
+
+## Download
+
+Get `SlopMonster.exe` from the
+[latest release](https://github.com/bth0mp/slopmonster-gui/releases/latest). There is no
+installer: the file is the app, about 12 MB. Put it in a folder where it can stay, such as
+`%LOCALAPPDATA%\Programs\SlopMonster`, because a shortcut stops working when the file
+moves.
+
+Each release also has `SHA256SUMS.txt`. To check your download, run this in PowerShell in
+the folder that holds the exe and compare the result with the line in that file:
+
+```powershell
+(Get-FileHash .\SlopMonster.exe -Algorithm SHA256).Hash.ToLower()
+```
+
+### "Windows protected your PC"
+
+The exe is not code-signed, so the first time you open it Windows SmartScreen shows a blue
+window saying it prevented an unrecognized app from starting. Press **More info**, check
+that the file name is `SlopMonster.exe`, then press **Run anyway**. Windows remembers the
+choice for that file. Your browser may also say the file is not commonly downloaded. In
+Edge, open the download's menu and choose **Keep**, then **Keep anyway**.
+
+If you would rather not run an unsigned download, check its SHA-256 as above, or
+[build it yourself](#build-from-source).
+
+## Requirements
+
+- Windows 10 or 11.
+- Chrome or Edge, for the app window. Without either, SlopMonster opens in a tab of your
+  default browser and Ctrl+Alt+U is not available.
+- At least one of these two command-line tools. Install it, then sign in:
+  - [Claude Code](https://code.claude.com/docs/en/setup), to rewrite with Claude. In
+    PowerShell: `irm https://claude.ai/install.ps1 | iex`, or
+    `winget install Anthropic.ClaudeCode`. SlopMonster finds `claude.exe` where either
+    one puts it, so sign in with its Sign in to Claude button. The PowerShell installer
+    does not add its folder to PATH, so `claude auth login` in a terminal works only
+    after you add `%USERPROFILE%\.local\bin` to PATH yourself. SlopMonster cannot run the
+    npm copy of Claude Code (`claude.cmd`).
+  - OpenAI's [Codex CLI](https://github.com/openai/codex), to rewrite with ChatGPT:
+    `npm install -g @openai/codex`, which needs [Node.js](https://nodejs.org/), then
+    `codex login` and choose to sign in with ChatGPT.
+
+SlopMonster includes neither tool. It runs the copy on your PC, under your account, and
+never sees your password. Settings also has Sign in to Claude and Sign in to ChatGPT
+buttons, which open the tool's own sign-in in a console window and your browser. Being
+signed in to the Claude or ChatGPT desktop app does not sign the command-line tool in.
 
 ## Quick start
 
-The checker uses Python 3 and its standard library. It needs no API key or packages
-to install.
+1. Install Claude Code, the Codex CLI or both, and sign in.
+2. Download `SlopMonster.exe` and open it. Right-click it and choose **Pin to Start** to
+   keep it handy.
+3. The pill at the top of the window names the AI that will do the rewrite. Open Settings
+   to switch it.
+4. Paste a draft with Ctrl+V and press **Unslop**, or Ctrl+Enter.
+5. Read the result and the notes under it, then press **Copy text**, or **Save as Word**
+   for a file.
+6. **Turn off**, or closing the window, stops SlopMonster.
 
-```bash
-git clone https://github.com/ItsssssJack/SlopMonster
-cd SlopMonster
+The full guide, including every switch and how Word files are handled, is in
+[app/README.md](app/README.md).
 
-# Check a short draft.
-python3 tools/deslop.py --text "It's not just a tool, it's a game-changing journey."
-# Scores 3/5 and exits with status 1.
+## Privacy
 
-# Check a Markdown file.
-python3 tools/deslop.py README.md
+- The score comes from `tools/deslop.py`, which runs on your PC. Checking text sends
+  nothing anywhere.
+- A rewrite sends your text and the rewrite instructions to OpenAI through the Codex CLI,
+  with Codex's shell, web search and other tools switched off, or to Anthropic through
+  Claude Code. It goes under your account, and each provider's own terms apply. The app
+  sends your text nowhere else, and the page loads nothing from the internet.
+- The app is a small server that listens only on `127.0.0.1` and answers only the page it
+  served.
+- Your settings, saved instructions, log and the app window's browser profile are in
+  `%LOCALAPPDATA%\SlopMonster`. The log records what happened on each run, such as the
+  model, rounds and scores, but never your text. Results are kept in memory only and are
+  gone when you turn SlopMonster off.
+- The clipboard is read when you press Ctrl+Alt+U, and written only when a rewrite passes
+  and the clipboard still holds the text you copied.
 
-# Check text extracted from an HTML file.
-python3 tools/deslop.py index.html
+## Build from source
+
+Running from source needs Python 3.9 or newer on Windows, and `pypdf` for PDFs:
+
+```powershell
+git clone https://github.com/bth0mp/slopmonster-gui
+cd slopmonster-gui
+python -m pip install pypdf
+powershell -ExecutionPolicy Bypass -File app\make-shortcut.ps1
 ```
 
-Each category with a match costs one point, regardless of how many matches it
-contains. The command exits with status 0 at 5/5 and status 1 below 5/5. Empty input
-also fails. Checking a file leaves its contents unchanged.
+The script puts a SlopMonster shortcut on the Desktop and in the Start Menu, which starts
+`app\server.py` with no console window.
 
-For Markdown, the checker skips fenced code blocks, inline code, images and
-struck-through examples. For HTML, it removes tags and script/style contents. It
-doesn't render the page, so text hidden by CSS can still be included.
+To build `SlopMonster.exe` yourself:
 
-## Edit a draft
-
-Give your agent [SKILL.md](SKILL.md) and the draft. Include the intended audience
-and where the writing will appear if those are unclear from the text.
-
-1. Run the checker to identify the patterns it recognizes.
-2. Review the draft's purpose and order. A README should explain the tool and show
-   how to use it. An email should make its reason for writing clear.
-3. Rewrite unclear or repetitive passages. Check that each sentence adds useful
-   information and that claims match the supplied facts.
-4. Request a second editing pass from a different model family, then inspect the
-   changes and run the checker again.
-
-The second pass uses [prompts/cleanse.txt](prompts/cleanse.txt). With a supported AI
-command-line tool (CLI) installed and authenticated, run:
-
-```bash
-# If Claude wrote the draft, use Codex for the second pass.
-DESLOP_WRITER=claude tools/cleanse.sh draft.md > cleansed.md
-
-# If GPT wrote the draft, use Claude for the second pass.
-DESLOP_WRITER=gpt tools/cleanse.sh draft.md > cleansed.md
-
-# Read the edited file, then check it as Markdown.
-python3 tools/deslop.py cleansed.md
+```powershell
+python -m pip install -r packaging\requirements-build.txt
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1
+python packaging\smoke_exe.py dist\SlopMonster.exe
 ```
 
-Run the command for the family that wrote your draft. The script writes edited
-copy to standard output and change notes to standard error. It uses the installed
-CLI's configured model.
+The exe is written to `dist\`. [packaging/README.md](packaging/README.md) explains what
+goes into it and how a tagged release is built on GitHub Actions. The app's tests use a
+stand-in for both AIs and make no model calls:
 
-If the required CLI is missing, the script prints the editing prompt and draft,
-then exits with status 127. Paste that output into the other model family's chat.
-A timeout exits with status 124. Check the exit status before treating the output
-file as an edited draft. A warning about a missing notes marker means the response
-may include change notes in the copy.
-
-Using another model provides another editing pass. It doesn't guarantee better
-writing. Review the result for changed facts and lost context before accepting it.
-
-### Use as an agent skill
-
-For Claude Code, copy this folder to `~/.claude/skills/slopmonster/` and invoke
-`/slopmonster`. For Codex or another agent, ask it to follow [SKILL.md](SKILL.md).
-
-## What the checker flags
-
-The current score has five categories:
-
-| Category | What it checks |
-|---|---|
-| Vocabulary | Listed words such as `delve` and `seamless`, including selected word forms. |
-| Sentence patterns | Listed constructions such as `not just X, but Y`, stacked hedges and certain self-answering questions. |
-| Punctuation | Repeated em dashes or stacked hyphenated compounds within a 220-character window in a sentence, plus semicolon density. |
-| Three-item lists | Two specific list patterns that often occur in promotional copy. |
-| Possible unsupported proof | Numbers near nouns such as `users` or `customers`. The checker cannot verify the claim. |
-
-The patterns are in [tools/deslop.py](tools/deslop.py). The broader editing
-catalogue is in [references/signs-of-ai-writing.md](references/signs-of-ai-writing.md).
-Some entries in that catalogue require editorial judgment and have no automated
-check.
-
-If a flagged customer count is accurate and you have evidence for it, use:
-
-```bash
-python3 tools/deslop.py index.html --allow-proof
+```powershell
+python app\test_server.py
+python app\test_documents.py
+python app\test_wordfile.py
+python app\test_page.py
 ```
 
-This option still reports proof matches but removes their score penalty. It
-doesn't check the evidence. In this mode, 5/5 can include proof warnings.
+## The checker and the agent skill
 
-## Review beyond the score
-
-Read the draft in the context where someone will encounter it. Check these points
-before accepting an edit:
-
-- **Audience and purpose:** Does it answer the reader's likely questions at the
-  right level of detail? Explain technical terms where they first matter.
-- **Opening:** Does the first paragraph explain the subject or establish a useful
-  reason to keep reading? Avoid adding a second hook that delays the explanation.
-- **Progression:** Does each sentence build on the previous one? Remove repeated
-  metaphors and contrasts that add no information.
-- **Claims:** Can you support each factual statement? Describe optional behavior
-  with its conditions. For example, a command's failure status only stops a
-  workflow if that workflow is configured to act on it.
-- **Voice:** Does the wording suit the author and format? Contractions are fine
-  where natural. Forced fragments and invented opinions can make the edit worse.
-
-See [references/principles.md](references/principles.md) for more editing guidance
-and examples. Never add a statistic or testimonial to make a sentence sound
-specific. If information is missing, flag it for the author.
-
-### Limits
-
-The checker uses English patterns and has no language detection. Text in another
-language can score 5/5 because those patterns don't match.
-
-It can flag ordinary wording and miss poor writing. It cannot determine who wrote
-the text, verify facts or judge whether a hook suits the audience. Use its findings
-as prompts for review. A passing score alone doesn't establish writing quality.
-
-## Optional CI check
-
-You can run the checker in continuous integration (CI), the automated checks a
-repository runs when code changes. Because a score below 5/5 returns a failure
-status, a workflow that runs the command can fail on flagged copy.
-
-This repository's [workflow](.github/workflows/slop.yml) runs the regression tests
-and checks both this README and a sample file. Copy it to your repository and set
-the file paths you want checked. Blocking a merge or deployment requires your own
-repository rules or deployment configuration.
+The scoring comes from SlopMonster's command-line checker, which also works on its own:
 
 ```bash
-python3 tools/test_deslop.py
-bash tools/test_cleanse.sh
-python3 tools/deslop.py README.md
+python tools/deslop.py README.md
+python tools/deslop.py --text "Some copy to check"
 ```
 
-## Examples and sources
+It reports matches in five categories (vocabulary, sentence patterns, punctuation,
+three-item lists and unsupported proof) and exits with status 1 below 5/5, so it can run
+in CI. [docs/SLOPMONSTER.md](docs/SLOPMONSTER.md) documents the checker, the editing
+workflow and the agent skill in [SKILL.md](SKILL.md).
 
-- [Jasper homepage excerpt](examples/jasper-live-run.md): a recorded editing run
-  with the commands and output from that run. Scores can change as rules change.
-- [Ridgeline Roofing](examples/ridgeline-roofing.md): a longer worked example with
-  before-and-after copy. Check any business facts before reusing a line.
-- [Source list](references/sources.md): Wikipedia's *Signs of AI writing* and the
-  open-source humanizer projects used to assemble the catalogue. The marketing
-  guidance also draws on Steve Krug, Daniel Priestley and Alex Hormozi.
+## Credits and license
 
-[MIT license](LICENSE).
+SlopMonster GUI is built on [SlopMonster](https://github.com/ItsssssJack/SlopMonster) by
+Jack Roberts ([ItsssssJack](https://github.com/ItsssssJack)). The checker, the rewrite prompt, the editing guides, the agent skill and the
+mascot come from that project, under the MIT license. This fork adds the Windows app and
+rules for wording that a chat reply puts around a draft. The whole repository is under the
+[MIT license](LICENSE), which keeps the original copyright notice.
+
+SlopMonster GUI is not affiliated with Anthropic or OpenAI. Claude and Claude Code are
+trademarks of Anthropic. ChatGPT and Codex are trademarks of OpenAI.
