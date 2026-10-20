@@ -18,7 +18,6 @@ import logging
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -156,12 +155,6 @@ def hotkey_watch():
             server.queue_event({'event': 'hotkey', 'text': text})
 
 
-def free_port():
-    with contextlib.closing(socket.socket()) as s:
-        s.bind(('127.0.0.1', 0))
-        return s.getsockname()[1]
-
-
 def word_text(path):
     """The text of a Word file's body, run by run."""
     with zipfile.ZipFile(path) as z:
@@ -182,13 +175,22 @@ threading.Thread(target=hotkey_watch, daemon=True).start()
 failed = True
 proc = job = None
 try:
-    debug = free_port()
-    proc = subprocess.Popen([browser, '--headless=new', f'--remote-debugging-port={debug}',
+    # The browser picks its own debugging port and writes it to DevToolsActivePort, so no
+    # other program can take it first. A cold CI runner can take well over 15 s to start it.
+    proc = subprocess.Popen([browser, '--headless=new', '--remote-debugging-port=0',
                              '--user-data-dir=' + os.path.join(tmp, 'profile'), '--no-first-run',
                              '--no-default-browser-check', '--disable-sync', '--disable-features=msImplicitSignin',
                              '--window-size=1180,820', '--hide-scrollbars', 'about:blank'],
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     job = server.contain(proc)                 # Edge and every process it starts end with this one
+    active, debug = os.path.join(tmp, 'profile', 'DevToolsActivePort'), ''
+    deadline = time.time() + 60
+    while time.time() < deadline and not debug:
+        with contextlib.suppress(OSError):
+            with open(active, encoding='ascii', errors='replace') as fh:
+                debug = fh.read().split('\n')[0].strip()
+        if not debug:
+            time.sleep(0.1)
     run = subprocess.run([node, os.path.join(HERE, 'test_page.mjs'), url, str(debug), tmp, HERE] + sys.argv[1:],
                          capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=900)
     report = run.stdout + run.stderr

@@ -10,7 +10,7 @@ const W = 1180, H = 820;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let target = null;
-for (let i = 0; i < 100 && !target; i++) {
+for (let i = 0; i < 300 && !target; i++) {   // 45 s: a cold CI runner starts slowly
   await sleep(150);
   try { target = (await (await fetch(`http://127.0.0.1:${debug}/json/list`)).json()).find((t) => t.type === 'page'); } catch {}
 }
